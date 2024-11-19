@@ -1,6 +1,8 @@
 # Avalon AI
 
-The system will be a web app with a simple UI showing a game state diagram and a group chat interface where 5 AI agents play Avalon together.
+A web app with a simple UI showing a game state diagram and a group chat interface where 5 AI agents play Avalon together. You can also join the game as a human player.
+
+![screenshot](screenshot.png)
 
 ## Core Architecture:
 
