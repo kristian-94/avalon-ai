@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Events\NewMessage;
+use App\Jobs\GameLoop;
 use App\Models\Game;
 use App\Models\Player;
 use App\Models\Message;
 use App\Models\GameEvent;
+use App\Services\OpenAIService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -143,7 +145,7 @@ class GameController extends Controller
             ], 500);
         }
 
-//        ProcessAITurn::dispatch($game->id)->delay(now()->addSeconds(2));
+        GameLoop::dispatch($game->id)->delay(now()->addSeconds(2));
         // will loop and dispatch the next turn until the game is over
 
         return response()->json([
@@ -179,6 +181,48 @@ class GameController extends Controller
             'message' => $message
         ]);
     }
+
+    public function testAI(Request $request): JsonResponse
+    {
+        $gameId = $request->input('gameId');
+        $playerId = $request->input('playerId');
+
+        $game = Game::with(['players', 'messages'])->findOrFail($gameId);
+        $player = Player::findOrFail($playerId);
+
+        // Create a simple test message array
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => "You are {$player->name}, playing as {$player->role} in Avalon. Give a quick greeting to the group."
+            ]
+        ];
+
+        // Get response from OpenAI
+        $openAI = new OpenAIService();
+        $response = $openAI->getChatResponse($messages);
+
+        if (empty($response['message'])) {
+            return response()->json(['error' => 'No response from AI'], 500);
+        }
+
+        // Create and broadcast the message
+        $message = Message::create([
+            'game_id' => $gameId,
+            'player_id' => $playerId,
+            'message_type' => 'public_chat',
+            'content' => $response['message']
+        ]);
+
+        broadcast(new NewMessage($message));
+
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'aiResponse' => $response
+        ]);
+    }
+
     private function generateRoleKnowledge(string $role, int $playerIndex, array $allRoles): array
     {
         $knowledge = [
