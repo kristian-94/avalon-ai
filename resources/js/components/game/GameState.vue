@@ -11,7 +11,6 @@ import MissionTracker from "./MissionTracker.vue";
 
 import {ref} from 'vue'
 
-// Mock missions data for now.
 const missions = ref([
   {id: 1, name: 'Mission 1', status: 'success', result: null, required: 2},
   {id: 2, name: 'Mission 2', status: 'pending', result: null, required: 3},

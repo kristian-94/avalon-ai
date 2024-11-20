@@ -33,10 +33,9 @@
 </template>
 
 <script setup lang="ts">
-
-
-import {defineEmits, ref} from 'vue'
+import {ref} from 'vue'
 import {useRouter} from 'vue-router'
+import axios from "axios";
 
 const gameState = ref<'initializing' | null>(null)
 const router = useRouter()
@@ -44,24 +43,17 @@ const router = useRouter()
 const startGame = async (mode: 'play' | 'watch') => {
   gameState.value = 'initializing'
 
-// Simulate a small delay for better UX
-  await new Promise(resolve => setTimeout(resolve, 1000))
+  const response = await axios.post('/api/game/initialize', {
+    mode: mode
+  });
 
-// const { gameId, players } = await fetch('/api/game/start', {
-//   method: 'POST',
-//   headers: { 'Content-Type': 'application/json' },
-//   body: JSON.stringify({ mode })
-// }).then(res => res.json())
+  const {gameId, playerId, message} = response.data
 
-  let gameId = 1
-  let players = []
-  emit('gameStarted', {gameId, players})
+  localStorage.setItem('playerId', playerId);
+  localStorage.setItem('gameId', gameId);
+  localStorage.setItem('initialMessage', message);
 
-// Navigate to the game route
+  // Navigate to the game route
   await router.push(`/game/${gameId}`)
 }
-
-const emit = defineEmits<{
-  (e: 'gameStarted', data: { gameId: number, players: any[] }): void
-}>()
 </script>

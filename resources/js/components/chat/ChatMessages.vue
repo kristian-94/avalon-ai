@@ -15,9 +15,11 @@ import ChatMessage from './ChatMessage.vue';
 const props = defineProps<{
   messages: Array<{
     id: number;
-    sender: string;
-    text: string;
-    isSystem: boolean;
+    player_name: string;
+    player_id?: number;
+    content: string;
+    created_at: string;
+    isSystem?: boolean;
   }>;
 }>();
 
