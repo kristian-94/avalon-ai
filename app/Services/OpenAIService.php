@@ -18,16 +18,6 @@ class OpenAIService
 
     public function getChatResponse(array $messages): array
     {
-        // Add JSON instruction to the first system message
-        if (!empty($messages) && $messages[0]['role'] === 'system') {
-            $messages[0]['content'] .= "\n\nRespond in JSON format according to the provided function schema.";
-        } else {
-            array_unshift($messages, [
-                'role' => 'system',
-                'content' => "Respond in JSON format according to the provided function schema."
-            ]);
-        }
-
         try {
             $response = Http::withToken($this->apiKey)
                 ->withHeaders([
@@ -54,6 +44,10 @@ class OpenAIService
                                 'mission_action' => [
                                     'type' => 'boolean',
                                     'description' => 'Optional mission action'
+                                ],
+                                'urgency' => [
+                                    'type' => 'number',
+                                    'description' => 'Urgency of the action, 0-1. 1 is most urgent. You would use this to indicate that you want to speak first.'
                                 ],
                                 'reasoning' => [
                                     'type' => 'string',

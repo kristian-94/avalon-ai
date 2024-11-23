@@ -11,7 +11,7 @@
               @click="startGame('play')"
               class="px-8 py-4 bg-yellow-800 text-white rounded-lg border-2 border-yellow-900 hover:bg-yellow-700 transition-colors"
           >
-            Play as Loyal Servant
+            Play with AI
           </button>
           <button
               @click="startGame('watch')"

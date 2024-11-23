@@ -12,6 +12,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class GameLoop implements ShouldQueue
@@ -63,6 +64,13 @@ class GameLoop implements ShouldQueue
 
     private function getEligiblePlayers(Game $game, string $currentPhase): array
     {
+        if ($currentPhase === 'setup') {
+            // Get players who haven't spoken in the current round. Setup is just one message per player.
+            return $game->players
+                ->filter(fn($p) => !$game->messages->contains(fn($msg) => $msg->player_id === $p->id))
+                ->all();
+        }
+
         return match ($currentPhase) {
             'setup' => $game->players->all(),
             'team_proposal' => $game->players
@@ -86,7 +94,7 @@ class GameLoop implements ShouldQueue
         $messages = $this->prepareAIContext($game, $player);
 
         // Get AI response
-        $openAI = new \App\Services\OpenAIService();
+        $openAI = new OpenAIService();
         $response = $openAI->getChatResponse($messages);
 
         if (empty($response['message'])) {
@@ -164,7 +172,9 @@ class GameLoop implements ShouldQueue
             ->filter()
             ->toArray();
 
-        return $messages;
+        $messages[0]['content'] .= "\n\nRespond in JSON format according to the provided function schema.";
+
+        return array_values($messages);
     }
 
     private function checkPhaseTransition(Game $game): void
@@ -224,19 +234,40 @@ class GameLoop implements ShouldQueue
         return $messagesSincePhaseStart >= 5; // Arbitrary number, adjust as needed
     }
 
+    private function getNextLeader(Game $game): int
+    {
+        $gameState = $game->game_state;
+
+        // If no current leader, start with player 0
+        if (!isset($gameState['currentLeader'])) {
+            return 0;
+        }
+
+        // Get total number of players
+        $playerCount = $game->players()->count();
+
+        // Rotate to next player
+        return ($gameState['currentLeader'] + 1) % $playerCount;
+    }
+
     private function transitionToNextPhase(Game $game): void
     {
         $gameState = $game->game_state;
         $currentPhase = $gameState['currentPhase'];
 
+        // Determine next phase
         $gameState['currentPhase'] = match ($currentPhase) {
-            'setup' => 'team_proposal',
+            'setup', 'discussion' => 'team_proposal',
             'team_proposal' => 'team_voting',
             'team_voting' => $this->determineNextPhaseAfterVoting($game),
             'mission' => 'discussion',
-            'discussion' => 'team_proposal',
             default => $currentPhase
         };
+
+        // Update leader for team proposal phases
+        if ($gameState['currentPhase'] === 'team_proposal') {
+            $gameState['currentLeader'] = $this->getNextLeader($game);
+        }
 
         $gameState['phaseStarted'] = now()->toIso8601String();
 
@@ -255,5 +286,12 @@ class GameLoop implements ShouldQueue
         }
 
         return 'team_proposal';
+    }
+
+    public static function isRunning(): bool
+    {
+        return DB::table('jobs')
+            ->whereRaw('json_extract(payload, "$.data.commandName") = ?', ['App\Jobs\GameLoop'])
+            ->exists();
     }
 }

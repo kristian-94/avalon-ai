@@ -10,7 +10,9 @@
           transition-colors duration-200"
           :class="[
           mission.result === null 
-            ? 'border-white/50 text-white/90' 
+            ? currentMissionId === mission.id
+              ? 'border-blue-500 ring-4 ring-blue-500/20 text-white'
+              : 'border-white/50 text-white/90'
             : mission.result.success
               ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
               : 'border-red-500 bg-red-500/20 text-red-300'
@@ -18,7 +20,6 @@
       >
         {{ mission.required }}
       </div>
-
       <!-- Hover tooltip -->
       <div
           class="absolute bottom-full mb-2 p-2 bg-black/80 rounded-lg text-white text-sm
@@ -44,7 +45,11 @@
 <script setup lang="ts">
 import type {Mission} from '../../types/game'
 
-defineProps<{
+const props = defineProps<{
   missions: Mission[]
+  currentMissionId?: number
 }>()
+console.log('Props:', { missions: props.missions, currentMissionId: props.currentMissionId })
+
+
 </script>

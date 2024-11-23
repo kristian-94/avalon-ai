@@ -48,17 +48,18 @@ class GameController extends Controller
                 // 2. Create players and their initial messages
                 $indexedPlayersToRoles = [];
 
-                foreach ($roles as $index => $role) {
-                    $isHuman = $mode === 'play' &&
-                        $role === 'loyal_servant' &&
-                        random_int(1, count(array_filter($roles, fn($r) => $r === 'loyal_servant'))) === 1;
+                $hasHumanPlayer = $mode === 'play';
+                $humanRoleIndex = $hasHumanPlayer ? random_int(0, count($roles) - 1) : null;
+                $aiNames = ['Max', 'Alex', 'Sam', 'Jordan', 'Riley', 'Taylor', 'Morgan', 'Jamie'];
 
+                foreach ($roles as $index => $role) {
+                    $isHuman = $hasHumanPlayer && $index === $humanRoleIndex;
                     $roleKnowledge = $this->generateRoleKnowledge($role, $index, $roles);
 
                     $player = Player::create([
                         'game_id' => $game->id,
                         'player_index' => $index,
-                        'name' => $isHuman ? 'Human' : "Agent " . ($index + 1),
+                        'name' => $isHuman ? 'Human' : $aiNames[$index],
                         'role' => $role,
                         'is_human' => $isHuman,
                         'role_knowledge' => $roleKnowledge
@@ -186,9 +187,24 @@ class GameController extends Controller
     {
         $gameId = $request->input('gameId');
         $playerId = $request->input('playerId');
+        $runGameLoop = $request->input('runGameLoop');
 
-        $game = Game::with(['players', 'messages'])->findOrFail($gameId);
-        $player = Player::findOrFail($playerId);
+        $game = Game::with(['players', 'messages'])->find($gameId);
+        if (!$game) {
+            return response()->json(['error' => 'Game not found'], 400);
+        }
+
+        $players = $game->players;
+        $player = $players->firstWhere('id', $playerId);
+
+        if (!$player) {
+            return response()->json(['error' => 'Player not found'], 400);
+        }
+
+        if ($runGameLoop) {
+            GameLoop::dispatchSync($gameId);
+            return response()->json(['message' => 'Game loop ran']);
+        }
 
         // Create a simple test message array
         $messages = [
@@ -266,6 +282,62 @@ class GameController extends Controller
                     collect($knowledge['knownEvil'])->map(fn($i) => "Player " . ($i + 1))->join(', ') . '.';
             default:
                 return '';
+        }
+    }
+
+
+    public function getGameState(Request $request, $gameId): JsonResponse
+    {
+        try {
+            $game = Game::with(['players', 'messages' => function($query) {
+                $query->orderBy('created_at', 'asc');
+            }])->findOrFail($gameId);
+
+            // Get mission data from game_state
+            $missions = $game->game_state['missions'] ?? [
+                ['id' => 1, 'name' => 'Mission 1', 'status' => 'pending', 'result' => null, 'required' => 2],
+                ['id' => 2, 'name' => 'Mission 2', 'status' => 'pending', 'result' => null, 'required' => 3],
+                ['id' => 3, 'name' => 'Mission 3', 'status' => 'pending', 'result' => null, 'required' => 2],
+                ['id' => 4, 'name' => 'Mission 4', 'status' => 'pending', 'result' => null, 'required' => 3],
+                ['id' => 5, 'name' => 'Mission 5', 'status' => 'pending', 'result' => null, 'required' => 2],
+            ];
+
+            return response()->json([
+                'game' => [
+                    'id' => $game->id,
+                    'game_state' => [
+                        'currentPhase' => $game->game_state['currentPhase'] ?? 'setup',
+                        'turnCount' => $game->game_state['turnCount'] ?? 0,
+                        'currentLeader' => $game->game_state['currentLeader'] ?? null,
+                        'currentMission' => $game->game_state['currentMission'] ?? ['id' => 1],
+                        'currentProposal' => $game->game_state['currentProposal'] ?? null,
+                        'missions' => $missions
+                    ],
+                    'has_human_player' => $game->has_human_player
+                ],
+                'messages' => $game->messages->map(function($message) {
+                    return [
+                        'id' => $message->id,
+                        'content' => $message->content,
+                        'player_id' => $message->player_id,
+                        'player_name' => $message->player ? $message->player->name : 'System',
+                        'created_at' => $message->created_at,
+                        'isSystem' => $message->message_type === 'game_event'
+                    ];
+                }),
+                'players' => $game->players->map(function($player) {
+                    return [
+                        'id' => $player->id,
+                        'name' => $player->name,
+                        'is_human' => $player->is_human
+                    ];
+                })
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to fetch game state',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 }

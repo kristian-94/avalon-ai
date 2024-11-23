@@ -1,5 +1,39 @@
 <template>
-  <div class="aspect-video relative">
-    <div class="absolute inset-0 border border-white/20 rounded-lg"></div>
+  <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div
+        v-for="player in players"
+        :key="player.id"
+        :class="[
+        'bg-black/40 backdrop-blur-sm rounded-lg p-4',
+        player.id === currentLeader ? 'ring-2 ring-yellow-500/50' : '',
+        'transition-all duration-300'
+      ]"
+    >
+      <div class="flex items-center justify-between">
+        <div class="text-white font-semibold">{{ player.name }}</div>
+        <div v-if="player.id === currentLeader" class="text-yellow-500 text-sm">
+          Leader
+        </div>
+      </div>
+      <div class="text-white/70 text-sm mt-1">
+        {{ player.is_human ? 'Human Player' : 'AI Agent' }}
+      </div>
+    </div>
   </div>
 </template>
+
+<script setup lang="ts">
+interface Player {
+  id: number
+  name: string
+  is_human: boolean
+}
+const props = defineProps<{
+  players: Player[]
+  currentLeader?: number
+}>()
+console.log('PlayerArea:', {
+  players: props.players.map(p => ({id: p.id, name: p.name})),
+  currentLeader: props.currentLeader
+})
+</script>
