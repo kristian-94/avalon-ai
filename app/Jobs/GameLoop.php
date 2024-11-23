@@ -2,9 +2,16 @@
 
 namespace App\Jobs;
 
+use App\Events\GameStateUpdate;
 use App\Events\NewMessage;
+use App\Facades\Agent;
 use App\Models\Game;
+use App\Models\GameEvent;
 use App\Models\Message;
+use App\Models\MissionProposal;
+use App\Models\MissionProposalMember;
+use App\Models\MissionProposalVote;
+use App\Models\MissionTeamMember;
 use App\Models\Player;
 use App\Services\OpenAIService;
 use Illuminate\Bus\Queueable;
@@ -19,39 +26,28 @@ class GameLoop implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    private $gameId;
     private $minThinkingTime = 2; // Minimum seconds before AI responds
     private $maxThinkingTime = 5; // Maximum seconds before AI responds
 
-    public function __construct(int $gameId)
+    public function __construct(public int $gameId)
     {
-        $this->gameId = $gameId;
     }
 
     public function handle(): void
     {
-        $game = Game::with(['players', 'messages', 'gameEvents'])->find($this->gameId);
+        $game = Game::with(['players', 'messages', 'gameEvents', 'currentMission', 'currentProposal'])->find($this->gameId);
 
-        if (!$game) {
-            Log::error('Game not found', ['gameId' => $this->gameId]);
+        if (!$game || $game->ended_at !== null) {
             return;
         }
-
-        // Check if game is over
-        if ($game->ended_at !== null) {
-            return;
-        }
-
-        $gameState = $game->game_state;
-        $currentPhase = $gameState['currentPhase'];
 
         // Determine which players should act based on the current phase
-        $eligiblePlayers = $this->getEligiblePlayers($game, $currentPhase);
+        $eligiblePlayers = $this->getEligiblePlayers($game);
 
         // Process turns for eligible AI players
         foreach ($eligiblePlayers as $player) {
             if (!$player->is_human) {
-                $this->processAIPlayerTurn($game, $player, $currentPhase);
+                $this->processAIPlayerTurn($game, $player);
             }
         }
 
@@ -62,79 +58,143 @@ class GameLoop implements ShouldQueue
         self::dispatch($this->gameId)->delay(now()->addSeconds(random_int($this->minThinkingTime, $this->maxThinkingTime)));
     }
 
-    private function getEligiblePlayers(Game $game, string $currentPhase): array
+    public function endGame(Game $game, string $winner): void
     {
-        if ($currentPhase === 'setup') {
-            // Get players who haven't spoken in the current round. Setup is just one message per player.
-            return $game->players
-                ->filter(fn($p) => !$game->messages->contains(fn($msg) => $msg->player_id === $p->id))
-                ->all();
+        $game->update([
+            'ended_at' => now(),
+            'winner' => $winner
+        ]);
+
+        GameEvent::create([
+            'game_id' => $game->id,
+            'event_type' => 'game_end',
+            'event_data' => ['winner' => $winner]
+        ]);
+
+        broadcast(new GameStateUpdate($game));
+
+        $roleRevealString = '';
+        foreach ($game->players as $player) {
+            $connectingWord = ' a';
+            if ($player->role === 'merlin') {
+                $connectingWord = '';
+            } else if (in_array($player->role[0], ['a', 'e', 'i', 'o', 'u'])) {
+                $connectingWord = ' an';
+            }
+            $roleRevealString .= " {$player->name} was" . $connectingWord . " {$player->role}.";
         }
 
-        return match ($currentPhase) {
-            'setup' => $game->players->all(),
-            'team_proposal' => $game->players
-                ->where('player_index', $game->game_state['currentLeader'] ?? 0)
+        // Add private thoughts for context and instructions
+        foreach ($game->players as $player) {
+            $message = '';
+            if ($player->role === 'merlin') {
+                $message = "You are Merlin and the evil team has won. You were unable to identify all the evil players. ";
+            }
+            if ($winner === 'good') {
+                $message .= "The game has ended. The loyal servants have won.";
+            } else {
+                $message .= "The game has ended. The minions of Mordred have won.";
+            }
+
+            $message .= $roleRevealString;
+
+            Message::create([
+                'game_id' => $game->id,
+                'player_id' => $player->id,
+                'message_type' => 'game_event',
+                'content' => $message
+            ]);
+        }
+    }
+
+    public function getEligiblePlayers(Game $game): array
+    {
+        return match ($game->current_phase) {
+            'setup' => $game->players()
+                ->whereDoesntHave('messages', function ($query) {
+                    $query->where('message_type', 'public_chat');
+                })
+                ->get()
                 ->all(),
-            'team_voting' => $game->players
-                ->filter(fn($p) => !isset($game->game_state['votes'][$p->player_index]))
+
+            'team_proposal' => $game->players()
+                ->where('id', $game->current_leader_id)
+                ->get()
                 ->all(),
-            'mission' => $game->players
-                ->filter(fn($p) => in_array($p->player_index, $game->game_state['currentTeam'] ?? []))
-                ->filter(fn($p) => !isset($game->game_state['missionVotes'][$p->player_index]))
+
+            'team_voting' => $game->players()
+                ->where('id', '!=', $game->current_leader_id)
+                ->whereDoesntHave('proposalVotes', function ($query) use ($game) {
+                    $query->where('proposal_id', $game->current_proposal_id);
+                })
+                ->get()
                 ->all(),
-            'discussion' => $game->players->all(),
+
+            'mission' => $game->currentMission
+                ->teamMembers()
+                ->whereNull('vote_success')
+                ->with('player')
+                ->get()
+                ->pluck('player')
+                ->all(),
+
             default => []
         };
     }
 
-    private function processAIPlayerTurn(Game $game, Player $player, string $currentPhase): void
+    public function processAIPlayerTurn(Game $game, Player $player): void
     {
-        // Get all relevant messages in chronological order
         $messages = $this->prepareAIContext($game, $player);
-
-        // Get AI response
-        $openAI = new OpenAIService();
-        $response = $openAI->getChatResponse($messages);
+        $response = Agent::getChatResponse($messages);
 
         if (empty($response['message'])) {
             Log::error('Empty AI response', ['game_id' => $game->id, 'player_id' => $player->id]);
             return;
         }
 
-        // Store the reasoning as a private thought if provided
-        if (!empty($response['reasoning'])) {
-            Message::create([
-                'game_id' => $game->id,
-                'player_id' => $player->id,
-                'message_type' => 'private_thought',
-                'content' => $response['reasoning']
-            ]);
-        }
-
         // Handle vote if provided
         if (isset($response['vote'])) {
-            $gameState = $game->game_state;
-            if (!isset($gameState['votes'])) {
-                $gameState['votes'] = [];
-            }
-            $gameState['votes'][$player->player_index] = $response['vote'];
-            $game->game_state = $gameState;
-            $game->save();
+            $this->processPlayerVote($game, $player, $response['vote']);
         }
 
         // Handle mission action if provided
-        if (isset($response['mission_action'])) {
-            $gameState = $game->game_state;
-            if (!isset($gameState['missionVotes'])) {
-                $gameState['missionVotes'] = [];
+        if (isset($response['mission_action']) && $game->currentMission) {
+            $teamMember = $game->currentMission->teamMembers()->where('player_id', $player->id)->first();
+            if ($teamMember) {
+                $teamMember->update(['vote_success' => $response['mission_action']]);
             }
-            $gameState['missionVotes'][$player->player_index] = $response['mission_action'];
-            $game->game_state = $gameState;
-            $game->save();
         }
 
-        // Create and broadcast the public message
+        // Handle team proposal
+        if (isset($response['team_proposal']) && $game->current_leader_id === $player->id) {
+            $proposal = MissionProposal::create([
+                'game_id' => $game->id,
+                'mission_id' => $game->currentMission->id,
+                'proposed_by_id' => $player->id,
+                'proposal_number' => $game->currentMission->proposals()->max('proposal_number') + 1 ?? 1,
+                'status' => 'pending'
+            ]);
+
+            // Add team members to proposal
+            $proposedPlayers = collect(explode(',', $response['team_proposal']))
+                ->map(fn($name) => $game->players()->where('name', trim($name))->first())
+                ->filter();
+
+            foreach ($proposedPlayers as $proposedPlayer) {
+                MissionProposalMember::create([
+                    'proposal_id' => $proposal->id,
+                    'player_id' => $proposedPlayer->id
+                ]);
+            }
+
+            $game->current_proposal_id = $proposal->id;
+            $game->current_phase = 'team_voting';
+            $game->save();
+
+            broadcast(new GameStateUpdate($game));
+        }
+
+        // Create and broadcast the message
         $message = Message::create([
             'game_id' => $game->id,
             'player_id' => $player->id,
@@ -145,19 +205,27 @@ class GameLoop implements ShouldQueue
         broadcast(new NewMessage($message));
     }
 
-    private function prepareAIContext(Game $game, Player $player): array
+    public function prepareAIContext(Game $game, Player $player): array
     {
         // Get all messages in chronological order
         $messages = $game->messages()
-            ->whereIn('message_type', ['private_thought', 'public_chat'])
-            ->orderBy('created_at', 'asc')
+            ->whereIn('message_type', ['system_prompt', 'private_thought', 'public_chat', 'game_event'])
+            ->orderBy('id', 'asc')
             ->get()
             ->map(function ($msg) use ($player) {
-                // Private thoughts for this player become system messages
-                if ($msg->message_type === 'private_thought' && $msg->player_id === $player->id) {
+                // system_prompt is the first message.
+                if ($msg->message_type === 'system_prompt' && $msg->player_id === $player->id) {
                     return [
                         'role' => 'system',
                         'content' => $msg->content
+                    ];
+                }
+
+                // Private thoughts for this player are from the assistant role
+                if ($msg->message_type === 'private_thought' && $msg->player_id === $player->id) {
+                    return [
+                        'role' => 'assistant',
+                        'content' => 'Private thought: ' . $msg->content
                     ];
                 }
                 // Public chat: assistant for current player, user for others
@@ -167,27 +235,28 @@ class GameLoop implements ShouldQueue
                         'content' => "{$msg->player->name}: {$msg->content}"
                     ];
                 }
+
+                if ($msg->message_type === 'game_event' && $msg->player_id === $player->id) {
+                    return [
+                        'role' => 'system',
+                        'content' => $msg->content
+                    ];
+                }
                 return null;
             })
             ->filter()
             ->toArray();
 
-        $messages[0]['content'] .= "\n\nRespond in JSON format according to the provided function schema.";
-
         return array_values($messages);
     }
 
-    private function checkPhaseTransition(Game $game): void
+    public function checkPhaseTransition(Game $game): void
     {
-        $gameState = $game->game_state;
-        $currentPhase = $gameState['currentPhase'];
-
-        $needsTransition = match ($currentPhase) {
+        $needsTransition = match ($game->current_phase) {
             'setup' => $this->shouldTransitionFromSetup($game),
             'team_proposal' => $this->shouldTransitionFromTeamProposal($game),
             'team_voting' => $this->shouldTransitionFromTeamVoting($game),
             'mission' => $this->shouldTransitionFromMission($game),
-            'discussion' => $this->shouldTransitionFromDiscussion($game),
             default => false
         };
 
@@ -196,7 +265,20 @@ class GameLoop implements ShouldQueue
         }
     }
 
-    private function shouldTransitionFromSetup(Game $game): bool
+    public function processPlayerVote(Game $game, Player $player, bool $approved): void
+    {
+        if (!$game->currentProposal) {
+            return;
+        }
+
+        MissionProposalVote::create([
+            'proposal_id' => $game->currentProposal->id,
+            'player_id' => $player->id,
+            'approved' => $approved
+        ]);
+    }
+
+    public function shouldTransitionFromSetup(Game $game): bool
     {
         // Transition from setup if all players have sent their initial messages
         return $game->messages()
@@ -205,87 +287,258 @@ class GameLoop implements ShouldQueue
                 ->count() >= $game->players()->count();
     }
 
-    private function shouldTransitionFromTeamProposal(Game $game): bool
+    public function shouldTransitionFromTeamProposal(Game $game): bool
     {
-        // Transition if the leader has proposed a team
-        return isset($game->game_state['proposedTeam']);
+        // Transition if there's a current proposal
+        return $game->current_proposal_id !== null;
     }
 
-    private function shouldTransitionFromTeamVoting(Game $game): bool
+    public function shouldTransitionFromTeamVoting(Game $game): bool
     {
-        // Transition if all players have voted
-        return count($game->game_state['votes'] ?? []) >= $game->players()->count();
+        if (!$game->currentProposal) {
+            return false;
+        }
+
+        // Transition if all players have voted on the current proposal
+        $totalVotes = $game->currentProposal->votes()->count();
+        $totalPlayers = $game->players()->count();
+
+        return $totalVotes >= ($totalPlayers - 1);
     }
 
-    private function shouldTransitionFromMission(Game $game): bool
+    public function shouldTransitionFromMission(Game $game): bool
     {
+        if (!$game->currentMission) {
+            return false;
+        }
+
         // Transition if all team members have submitted their mission votes
-        $teamSize = count($game->game_state['currentTeam'] ?? []);
-        return count($game->game_state['missionVotes'] ?? []) >= $teamSize;
-    }
-
-    private function shouldTransitionFromDiscussion(Game $game): bool
-    {
-        // Transition after a certain number of messages or time has passed
-        $messagesSincePhaseStart = $game->messages()
-            ->where('created_at', '>', $game->game_state['phaseStarted'])
+        $teamSize = $game->currentMission->teamMembers()->count();
+        $submittedVotes = $game->currentMission->teamMembers()
+            ->whereNotNull('vote_success')
             ->count();
 
-        return $messagesSincePhaseStart >= 5; // Arbitrary number, adjust as needed
+        return $teamSize > 0 && $submittedVotes >= $teamSize;
     }
 
-    private function getNextLeader(Game $game): int
+    public function transitionToNextPhase(Game $game): void
     {
-        $gameState = $game->game_state;
-
-        // If no current leader, start with player 0
-        if (!isset($gameState['currentLeader'])) {
-            return 0;
-        }
-
-        // Get total number of players
-        $playerCount = $game->players()->count();
-
-        // Rotate to next player
-        return ($gameState['currentLeader'] + 1) % $playerCount;
-    }
-
-    private function transitionToNextPhase(Game $game): void
-    {
-        $gameState = $game->game_state;
-        $currentPhase = $gameState['currentPhase'];
+        $previousPhase = $game->current_phase;
 
         // Determine next phase
-        $gameState['currentPhase'] = match ($currentPhase) {
-            'setup', 'discussion' => 'team_proposal',
+        $game->current_phase = match ($previousPhase) {
+            'setup', 'mission' => 'team_proposal',
             'team_proposal' => 'team_voting',
             'team_voting' => $this->determineNextPhaseAfterVoting($game),
-            'mission' => 'discussion',
-            default => $currentPhase
+            default => $game->current_phase
         };
 
-        // Update leader for team proposal phases
-        if ($gameState['currentPhase'] === 'team_proposal') {
-            $gameState['currentLeader'] = $this->getNextLeader($game);
+        if ($previousPhase === 'team_voting') {
+            $game->current_proposal_id = null;
+            $totalVotes = $game->currentProposal->votes()->count();
+            $requiredVotes = $game->players()->count() - 1; // Everyone must vote on who goes on the mission, except the leader
+
+            if ($totalVotes >= $requiredVotes) {
+                $approvalVotes = $game->currentProposal->votes()->where('approved', true)->count();
+                $requiredVotes = (($game->players()->count() - 1) / 2) + 1; // Majority vote required
+                $voteApproved = $approvalVotes >= $requiredVotes;
+
+                if ($voteApproved) {
+                    // If approved, move team members to mission
+                    foreach ($game->currentProposal->teamMembers as $member) {
+                        MissionTeamMember::create([
+                            'mission_id' => $game->currentMission->id,
+                            'player_id' => $member->player_id
+                        ]);
+                    }
+                    $game->current_phase = 'mission';
+
+                    $proposal = $game->currentProposal;
+                    $proposal->status = 'approved';
+                    $proposal->save();
+                } else {
+                    // If rejected, move to next leader for new proposal
+                    $game->current_phase = 'team_proposal';
+                    $game->current_leader_id = $this->getNextLeader($game);
+
+                    $proposal = $game->currentProposal;
+                    $proposal->status = 'rejected';
+                    $proposal->save();
+                }
+
+                $game->current_proposal_id = null;
+                $game->save();
+
+                GameEvent::create([
+                    'game_id' => $game->id,
+                    'event_type' => 'team_vote',
+                    'event_data' => [
+                        'approved' => $voteApproved,
+                        'votes_for' => $approvalVotes,
+                        'votes_against' => $requiredVotes - $approvalVotes
+                    ]
+                ]);
+
+                broadcast(new GameStateUpdate($game));
+            }
+        } else {
+            if ($game->current_phase === 'team_proposal') {
+                // If we're transitioning after a mission, set up the next mission
+                if ($previousPhase === 'mission') {
+                    $requiredVotes = $game->currentMission->teamMembers()->count();
+
+                    $failVotes = $game->currentMission->teamMembers()->where('vote_success', false)->count();
+                    $missionSucceeded = $failVotes === 0; // If there are any fail votes, the mission fails.
+
+                    $game->currentMission->status = $missionSucceeded ? 'success' : 'fail';
+                    $game->currentMission->success_votes = $requiredVotes - $failVotes;
+                    $game->currentMission->fail_votes = $failVotes;
+                    $game->currentMission->save();
+
+                    // Check if game should end
+                    $successfulMissions = $game->missions()->where('status', 'success')->count();
+                    $failedMissions = $game->missions()->where('status', 'fail')->count();
+
+                    if ($successfulMissions >= 3) {
+                        $game->current_phase = 'assassination';
+                        $game->save();
+                    } else if ($failedMissions < 3) {
+                        // Move to next mission
+                        $game->current_phase = 'team_proposal';
+                        $game->current_leader_id = $this->getNextLeader($game);
+                        $game->current_mission_id = $game->missions()
+                            ->where('status', 'pending')
+                            ->orderBy('mission_number')
+                            ->first()
+                            ->id;
+                        $game->save();
+                    }
+
+                    broadcast(new GameStateUpdate($game));
+                }
+            }
+        }
+        $game->save();
+
+        broadcast(new GameStateUpdate($game));
+
+        // Add private thoughts for context and instructions
+        foreach ($game->players()->where('is_human', false)->get() as $player) {
+            $contextMessage = $this->generatePhaseTransitionContext($previousPhase, $game, $player);
+            $instructionsMessage = null; // No instructions for next phase if the game is over.
+            if (isset($failedMissions) && $failedMissions < 3) {
+                $instructionsMessage = $this->generateNextPhaseInstructions($game, $player);
+            }
+
+            if ($contextMessage) {
+                Message::create([
+                    'game_id' => $game->id,
+                    'player_id' => $player->id,
+                    'message_type' => 'game_event',
+                    'content' => $contextMessage
+                ]);
+            }
+
+            if ($instructionsMessage) {
+                Message::create([
+                    'game_id' => $game->id,
+                    'player_id' => $player->id,
+                    'message_type' => 'game_event',
+                    'content' => $instructionsMessage
+                ]);
+            }
         }
 
-        $gameState['phaseStarted'] = now()->toIso8601String();
-
-        // Update game state
-        $game->game_state = $gameState;
-        $game->save();
+        if (isset($failedMissions) && $failedMissions >= 3) {
+            $this->endGame($game, 'evil');
+        }
     }
 
-    private function determineNextPhaseAfterVoting(Game $game): string
+    public function determineNextPhaseAfterVoting(Game $game): string
     {
-        $votes = $game->game_state['votes'] ?? [];
-        $approvalCount = count(array_filter($votes, fn($vote) => $vote === true));
-
-        if ($approvalCount > count($votes) / 2) {
-            return 'mission';
+        if (!$game->currentProposal) {
+            return 'team_proposal';
         }
 
-        return 'team_proposal';
+        $approvedVotes = $game->currentProposal->votes()
+            ->where('approved', true)
+            ->count();
+
+        $totalVotes = $game->currentProposal->votes()->count();
+
+        // Tied or rejected vote: If the vote is tied or rejected, the leader passes the turn clockwise and the team building phase is repeated.
+        return ($approvedVotes > ($totalVotes / 2)) ? 'mission' : 'team_proposal';
+    }
+
+    public function getNextLeader(Game $game): int
+    {
+        $playerCount = $game->players()->count();
+
+        if (!$game->current_leader_id) {
+            $firstPlayer = $game->players()->orderBy('player_index')->first();
+            return $firstPlayer ? $firstPlayer->id : 1;
+        }
+
+        $currentLeader = $game->players()->find($game->current_leader_id);
+        $nextIndex = ($currentLeader->player_index + 1) % $playerCount;
+
+        return $game->players()
+            ->where('player_index', $nextIndex)
+            ->first()
+            ->id;
+    }
+
+    public function generatePhaseTransitionContext(string $previousPhase, Game $game, Player $player): ?string
+    {
+        if ($previousPhase === 'mission') {
+            $completedMission = $game->missions()->whereIn('status', ['success', 'fail'])->latest('mission_number')->first();
+            $numberOfFailedVotes = $completedMission->teamMembers()->where('vote_success', false)->count();
+            return "Mission " . $completedMission->mission_number . " " . ($completedMission->status === 'success' ? "succeeded" : "failed with " . $numberOfFailedVotes . " failed vote" . ($numberOfFailedVotes === 1 ? "" : "s") . ". ");
+        }
+
+        return match ($previousPhase) {
+            'setup' => "Initial introductions are complete. The game is now moving to the team proposal phase.",
+            'team_proposal' => "The team has been proposed and now needs to be voted on.",
+            'team_voting' => $game->currentProposal ?
+                "The vote " . ($game->currentProposal->status === 'approved' ? "passed" : "failed") . ". " .
+                ($game->currentProposal->status === 'approved'
+                    ? "The proposed team will now go on the mission."
+                    : "Moving to the next leader for a new team proposal.")
+                : "Voting phase has concluded.",
+            default => null
+        };
+    }
+
+    public function generateNextPhaseInstructions(Game $game, Player $player): ?string
+    {
+        $isLeader = $game->current_leader_id === $player->id;
+
+        return match ($game->current_phase) {
+            'team_proposal' => $isLeader
+                ? "You are the leader for this round. You need to propose a team of " .
+                $game->currentMission->required_players . " players for the mission. Who do you trust?"
+                : $game->currentLeader->name . " will propose a team for the mission.",
+
+            'team_voting' => "You need to vote on the proposed team: " .
+                $game->currentProposal->teamMembers->map(fn($tm) => $tm->player->name)->join(', ') .
+                ". Consider if you trust these players to complete the mission successfully.",
+
+            'mission' => $game->currentMission->teamMembers()
+                ->where('player_id', $player->id)
+                ->exists()
+                ? "You are on the mission team. " . ($player->role === 'loyal_servant' || $player->role === 'merlin'
+                    ? "As a good player, you should support the mission."
+                    : "As an evil player, you can choose to sabotage the mission.")
+                : "The mission team will now attempt to complete their mission.",
+
+            'assassination' => match ($player->role) {
+                'assassin' => "The good team has won 3 missions. As the Assassin, you must now identify Merlin",
+                'merlin' => "The Assassination phase has begun. The Assassin will try to identify you",
+                default => "The Assassination phase has begun. The Assassin will try to identify Merlin"
+            },
+
+            default => null
+        };
     }
 
     public static function isRunning(): bool

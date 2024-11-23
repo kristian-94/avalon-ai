@@ -11,8 +11,11 @@
     >
       <div class="flex items-center justify-between">
         <div class="text-white font-semibold">{{ player.name }}</div>
-        <div v-if="player.id === currentLeader" class="text-yellow-500 text-sm">
-          Leader
+        <div v-if="player.id === currentLeader" class="text-yellow-500 text-2xl">
+          👑
+        </div>
+        <div v-if="props.currentProposal?.playerIndexes?.includes(player.player_index)" class="text-blue-500 text-2xl">
+          🗡️
         </div>
       </div>
       <div class="text-white/70 text-sm mt-1">
@@ -28,12 +31,15 @@ interface Player {
   name: string
   is_human: boolean
 }
+
 const props = defineProps<{
   players: Player[]
-  currentLeader?: number
+  currentLeader?: number // This is the player index, not the player ID
+  currentProposal?: {
+    team: string[]
+    playerIndexes: number[]
+    votes?: Record<string, boolean>
+  }
 }>()
-console.log('PlayerArea:', {
-  players: props.players.map(p => ({id: p.id, name: p.name})),
-  currentLeader: props.currentLeader
-})
+
 </script>

@@ -48,23 +48,39 @@
     <div class="mb-6 bg-black/40 backdrop-blur-sm rounded-lg p-4">
       <!-- Phase-specific info -->
       <div v-if="gameState?.currentPhase === 'team_proposal'" class="mt-2 text-white/80">
-        Waiting for team leader to propose {{ gameState.currentMission?.required }} players
+        Waiting for team leader {{ currentLeaderName }} to propose {{ requiredPlayerCount }} players
       </div>
       <div v-else-if="gameState?.currentPhase === 'team_voting'" class="mt-2 text-white/80">
-        Team proposed: {{ gameState.currentProposal?.team.join(', ') }}
+        Team proposed: {{ playersProposed }}
       </div>
       <div v-else-if="gameState?.currentPhase === 'mission'" class="mt-2 text-white/80">
-        Mission team: {{ gameState.currentMission?.team.join(', ') }}
+        Mission team: {{ gameState.currentMission }}
       </div>
     </div>
 
-    <PlayerArea :players="players" :currentLeader="gameState?.currentLeader"/>
+    <PlayerArea :players="players" :currentLeader="gameState?.currentLeader" :currentProposal="gameState?.currentProposal" />
   </div>
 </template>
 
 <script setup lang="ts">
 import PlayerArea from './PlayerArea.vue'
 import MissionTracker from "./MissionTracker.vue"
+import { computed } from 'vue'
+
+const currentLeaderName = computed(() => {
+  const leader = props.players.find(player => player.id === props.gameState.currentLeader)
+  return leader?.name || 'Unknown'
+})
+
+const requiredPlayerCount = computed(() => {
+  const currentMissionId = props.gameState?.currentMission?.id
+  const currentMission = props.gameState?.missions.find(m => m.id === currentMissionId)
+  return currentMission?.required || 'error'
+})
+
+const playersProposed = computed(() => {
+  return props.gameState?.currentProposal?.team.join(', ') || 'error';
+})
 
 interface MissionResult {
   success: boolean
@@ -87,10 +103,11 @@ interface Player {
   id: number
   name: string
   is_human: boolean
+  player_index: number
 }
 
 interface GameState {
-  currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission' | 'discussion'
+  currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission'
   turnCount: number
   currentLeader?: number
   currentMission?: {
@@ -100,6 +117,7 @@ interface GameState {
   }
   currentProposal?: {
     team: string[]
+    playerIndexes: number[]
     votes?: Record<string, boolean>
   }
   missions: Mission[]
@@ -114,8 +132,7 @@ const props = defineProps<{
 const phases = [
   { id: 'team_proposal', label: 'Propose Team' },
   { id: 'team_voting', label: 'Vote Team' },
-  { id: 'mission', label: 'Mission' },
-  { id: 'discussion', label: 'Discussion' }
+  { id: 'mission', label: 'Mission' }, // quick phase of just getting a vote, no discussions.
 ] as const
 
 // Helper to determine if a phase is complete in the current round
@@ -136,7 +153,6 @@ const formatPhase = (phase?: string) => {
     team_proposal: 'Proposing Team',
     team_voting: 'Voting on Team',
     mission: 'Mission in Progress',
-    discussion: 'Discussion Phase'
   }
   return formats[phase] || phase
 }

@@ -35,11 +35,6 @@ interface Player {
   is_human: boolean;
 }
 
-interface GameState {
-  currentPhase: string;
-  turnCount: number;
-}
-
 const route = useRoute()
 const router = useRouter()
 
@@ -95,18 +90,28 @@ const initializeGame = async () => {
 }
 
 const initializeWebSocket = () => {
-  window.Echo.channel(`game.${gameId.value}`)
-      .listen('NewMessage', (event: any) => {
-        const newMessage: Message = {
-          id: event.id || messages.value.length + 1,
-          player_name: event.player_name || 'Unknown',
-          content: event.content,
-          created_at: event.created_at,
-          isSystem: event.is_system,
-          player_id: event.player_id,
-        }
-        addMessage(newMessage)
-      })
+  const channel = window.Echo.channel(`game.${gameId.value}`)
+
+  // Listen for chat messages
+  channel.listen('NewMessage', (event: any) => {
+    const newMessage: Message = {
+      id: event.id || messages.value.length + 1,
+      player_name: event.player_name || 'Unknown',
+      content: event.content,
+      created_at: event.created_at,
+      isSystem: event.is_system,
+      player_id: event.player_id,
+    }
+    addMessage(newMessage)
+  })
+
+  // Listen for game state updates
+  channel.listen('.GameStateUpdate', (event: any) => {
+    console.log('Received game state update:', event)
+    if (event.gameState) {
+      gameState.value = event.gameState
+    }
+  })
 }
 
 const addMessage = (message: Message) => {

@@ -2,10 +2,11 @@
 
 namespace App\Services;
 
+use App\Contracts\AgentService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class OpenAIService
+class OpenAIService implements AgentService
 {
     private string $apiKey;
     private string $model = 'gpt-3.5-turbo-1106';
@@ -18,6 +19,7 @@ class OpenAIService
 
     public function getChatResponse(array $messages): array
     {
+        $messages = array_values($messages);
         try {
             $response = Http::withToken($this->apiKey)
                 ->withHeaders([
@@ -40,6 +42,10 @@ class OpenAIService
                                 'vote' => [
                                     'type' => 'boolean',
                                     'description' => 'Optional vote decision'
+                                ],
+                                'team_proposal' => [
+                                    'type' => 'string',
+                                    'description' => 'Comma separated list of player names for the team proposal, no spaces. Example: "Max,Riley"'
                                 ],
                                 'mission_action' => [
                                     'type' => 'boolean',
@@ -109,7 +115,7 @@ class OpenAIService
     private function getFallbackResponse(): array
     {
         return [
-            'message' => '*pauses thoughtfully* Let me consider this situation carefully...',
+            'message' => '', // Empty message to avoid spamming the chat
             'reasoning' => 'Encountered an issue processing my thoughts, taking a moment to reflect.',
             'vote' => null,
             'mission_action' => null

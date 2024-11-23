@@ -49,7 +49,5 @@ const props = defineProps<{
   missions: Mission[]
   currentMissionId?: number
 }>()
-console.log('Props:', { missions: props.missions, currentMissionId: props.currentMissionId })
-
 
 </script>

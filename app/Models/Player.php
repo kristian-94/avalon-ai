@@ -39,4 +39,9 @@ class Player extends Model
     {
         return $this->hasMany(GameEvent::class);
     }
+
+    public function proposalVotes(): HasMany
+    {
+        return $this->hasMany(MissionProposalVote::class);
+    }
 }
