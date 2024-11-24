@@ -37,7 +37,7 @@ class OpenAIService implements AgentService
                             'properties' => [
                                 'message' => [
                                     'type' => 'string',
-                                    'description' => 'The message to be displayed in chat'
+                                    'description' => 'The message to be displayed in public chat'
                                 ],
                                 'vote' => [
                                     'type' => 'boolean',

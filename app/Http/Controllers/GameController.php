@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\GameStateUpdate;
 use App\Events\NewMessage;
 use App\Jobs\GameLoop;
 use App\Models\Game;
@@ -75,12 +76,24 @@ class GameController extends Controller
         $gameId = $request->input('gameId');
         $playerId = $request->input('playerId');
         $runGameLoop = $request->input('runGameLoop');
+        $forceWebsocketGamestate = $request->input('forceWebsocketGamestate');
         if ($runGameLoop) {
             if (!$gameId) {
                 // Just get the latest game,  the game with the highest ID
                 $gameId = Game::max('id');
             }
             GameLoop::dispatchSync($gameId);
+            return response()->json(['message' => 'Game loop ran']);
+        }
+
+        if ($forceWebsocketGamestate) {
+            if (!$gameId) {
+                // Just get the latest game,  the game with the highest ID
+                $gameId = Game::max('id');
+            }
+
+            $game = Game::with(['players', 'messages'])->find($gameId);
+            broadcast(new GameStateUpdate($game));
             return response()->json(['message' => 'Game loop ran']);
         }
 

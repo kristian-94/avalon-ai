@@ -95,6 +95,9 @@ const initializeWebSocket = () => {
   channel.listen('.GameStateUpdate', (event: any) => {
     if (event) {
       gameState.value = event.eventData.game.game_state
+      if (event.eventData.players) {
+        players.value = event.eventData.players
+      }
     }
   })
 }

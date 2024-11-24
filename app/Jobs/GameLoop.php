@@ -169,6 +169,7 @@ class GameLoop implements ShouldQueue
         $messages = $this->prepareAIContext($game, $player);
         $response = Agent::getChatResponse($messages);
 
+        $needsMessage = true;
         if (empty($response['message'])) {
             Log::error('Empty AI response', ['game_id' => $game->id, 'player_id' => $player->id]);
             return;
@@ -184,6 +185,7 @@ class GameLoop implements ShouldQueue
             $teamMember = $game->currentMission->teamMembers()->where('player_id', $player->id)->first();
             if ($teamMember) {
                 $teamMember->update(['vote_success' => $response['mission_action']]);
+                $needsMessage = false; // No need to send a message for mission action
             }
         }
 
@@ -227,15 +229,18 @@ class GameLoop implements ShouldQueue
                 ]
             ]);
         }
-        // Create and broadcast the message
-        $message = Message::create([
-            'game_id' => $game->id,
-            'player_id' => $player->id,
-            'message_type' => 'public_chat',
-            'content' => $response['message']
-        ]);
 
-        broadcast(new NewMessage($message));
+        if ($needsMessage) {
+            // Create and broadcast the message
+            $message = Message::create([
+                'game_id' => $game->id,
+                'player_id' => $player->id,
+                'message_type' => 'public_chat',
+                'content' => $response['message']
+            ]);
+
+            broadcast(new NewMessage($message));
+        }
     }
 
     public function prepareAIContext(Game $game, Player $player): array

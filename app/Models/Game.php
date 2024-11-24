@@ -160,8 +160,9 @@ class Game extends Model
                     ];
                 })->toArray()),
             'players' => $game->players->map(function ($player) use ($game) {
+                $game->fresh();
                 // Include role if the game is finished
-                $role = $game->winner ? $player->role : null;
+                $role = $game->current_phase === 'finished' ? $player->role : null;
                 $roleLabel = $role ? ($role === 'loyal_servant' ? 'Loyal Servant' : ucfirst($role)) : null;
                 if ($role === 'merlin') {
                     $roleLabel = 'Merlin';
