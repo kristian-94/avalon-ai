@@ -13,10 +13,9 @@
 <script setup lang="ts">
 import ChatMessages from './ChatMessages.vue'
 import ChatInput from './ChatInput.vue'
-import {Message} from "../../types/game";
+import type {Message} from "../../types/game";
 
 defineProps<{
-  gameId: number
   playerId: number
   messages: Message[]
 }>()

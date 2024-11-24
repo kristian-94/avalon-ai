@@ -7,7 +7,7 @@
 
     <!-- Game Progress -->
     <div v-if="gameState?.currentPhase === 'finished'" class="mb-4">
-      <VictoryScreen :game-state="gameState" :players="players"/>
+      <VictoryScreen :game-state="gameState" :players="players" :game="game"/>
     </div>
     <div v-else class="mb-4 bg-black/40 backdrop-blur-sm rounded-lg p-4">
       <div class="text-white/70">
@@ -74,8 +74,8 @@
 import PlayerArea from './PlayerArea.vue'
 import MissionTracker from "./MissionTracker.vue"
 import {computed} from 'vue'
-import {GameState, Player} from "../../types/game";
 import VictoryScreen from './VictoryScreen.vue'
+import type {Game, GameState, Player} from "../../types/game";
 
 const currentLeaderName = computed(() => {
   const leader = props.players.find(player => player.id === props.gameState.currentLeader)
@@ -93,9 +93,9 @@ const playersProposed = computed(() => {
 })
 
 const props = defineProps<{
-  gameId: number
   gameState: GameState | null
   players: Player[]
+  game: Game
 }>()
 
 const phases = [
@@ -113,7 +113,5 @@ const isPhaseComplete = (phaseId: string) => {
 
   return thisPhaseIndex < currentPhaseIndex
 }
-
-console.log('GameState', props.gameState.currentPhase)
 
 </script>

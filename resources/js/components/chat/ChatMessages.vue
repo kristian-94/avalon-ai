@@ -14,7 +14,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import ChatMessage from './ChatMessage.vue'
-import {Message} from "../../types/game";
+import type {Message} from "../../types/game";
 
 const props = defineProps<{
   messages: Message[]

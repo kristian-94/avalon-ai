@@ -3,16 +3,16 @@
     <!-- Victory Banner -->
     <div :class="[
       'text-4xl font-bold',
-      gameState.winner === 'good' ? 'text-blue-400' : 'text-red-400'
+      game.winner === 'good' ? 'text-blue-400' : 'text-red-400'
     ]">
-      {{ gameState.winner === 'good' ? 'Good Triumphs!' : 'Evil Prevails!' }}
+      {{ game.winner === 'good' ? 'Good Triumphs!' : 'Evil Prevails!' }}
     </div>
 
     <!-- Assassination Result (if good team won missions) -->
     <div v-if="assassination" class="mt-4">
       <div class="mt-2 text-lg">
         <span class="text-red-400">{{ assassination.assassin.name }}</span>
-        assassinated
+        <span class="text-white/80"> assassinated </span>
         <span class="text-blue-400">{{ assassination.target.name }}</span>
         <div class="mt-2 text-white/80">
           {{ assassination.wasSuccessful ?
@@ -56,17 +56,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { Game, GameState, Player } from '../../types/game'
 
-const props = defineProps({
-  gameState: {
-    type: Object,
-    required: true
-  },
-  players: {
-    type: Array,
-    required: true
-  }
-})
+const props = defineProps<{
+  gameState: GameState
+  players: Player[]
+  game: Game
+}>()
 
 const completedMissions = computed(() =>
     props.gameState.missions.filter(m => m.status !== 'pending')

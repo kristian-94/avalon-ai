@@ -169,7 +169,11 @@ class Game extends Model
                     'missions' => $missions,
                     'proposals' => $proposals
                 ],
-                'has_human_player' => $game->has_human_player
+                'has_human_player' => $game->has_human_player,
+                'winner' => $game->winner,
+                'turn_count' => $game->turn_count,
+                'ended_at' => $game->ended_at,
+                'started_at' => $game->started_at,
             ],
             'messages' => array_values($game->messages
                 ->reject(fn($message) => $message->message_type !== 'public_chat')

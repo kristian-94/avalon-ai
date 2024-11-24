@@ -491,7 +491,6 @@ class GameLoop implements ShouldQueue
         }
         $game->save();
 
-        broadcast(new GameStateUpdate($game));
         $failedMissions = $game->missions()->where('status', 'fail')->count();
 
         // Add private thoughts for context and instructions
@@ -541,7 +540,9 @@ class GameLoop implements ShouldQueue
 
         if (isset($failedMissions) && $failedMissions >= 3) {
             $this->endGame($game, 'evil');
+            return;
         }
+        broadcast(new GameStateUpdate($game));
     }
 
     public function determineNextPhaseAfterVoting(Game $game): string

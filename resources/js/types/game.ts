@@ -61,6 +61,16 @@ export interface Assassination {
     wasSuccessful: boolean
 }
 
+export interface Game {
+    id: number
+    game_state: GameState,
+    has_human_player: boolean
+    winner: string | null
+    turn_count: number
+    ended_at: string | null // eg. 2024-11-24T22:21:22.000000Z
+    started_at: string | null
+}
+
 export interface GameState {
     currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission' | 'finished'
     turnCount: number

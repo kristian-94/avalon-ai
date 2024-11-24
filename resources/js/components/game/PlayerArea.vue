@@ -90,7 +90,7 @@
 </template>
 
 <script setup lang="ts">
-import {Player, GameState} from "../../types/game";
+import type {Player, GameState} from "../../types/game";
 import {computed} from "vue";
 
 const props = defineProps<{
@@ -121,6 +121,5 @@ const currentProposal = computed(() => {
 })
 const assassination = computed(() => props.gameState.assassination)
 const isGameFinished = computed(() => props.gameState.currentPhase === 'finished')
-console.log(props.gameState.currentPhase)
 
 </script>

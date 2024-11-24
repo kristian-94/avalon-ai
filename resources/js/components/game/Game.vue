@@ -8,8 +8,8 @@
   </div>
 
   <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <GameState :game-id="gameId" :game-state="gameState" :players="players"/>
-    <ChatInterface :game-id="gameId" :player-id="playerId" :messages="messages" @send-message="sendMessage"/>
+    <GameStateComponent :game-state="gameState" :players="players" :game="game"/>
+    <ChatInterface :player-id="playerId" :messages="messages" @send-message="sendMessage"/>
   </div>
 </template>
 
@@ -18,8 +18,8 @@ import {ref, onMounted, onUnmounted} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
 import axios from 'axios'
 import ChatInterface from "../chat/ChatInterface.vue"
-import GameState from "./GameState.vue"
-import {Message, Player} from "../../types/game";
+import GameStateComponent from "./GameState.vue"
+import type {Message, Player, Game, GameState} from "../../types/game";
 
 const route = useRoute()
 const router = useRouter()
@@ -31,14 +31,15 @@ const error = ref<string | null>(null)
 const messages = ref<Message[]>([])
 const players = ref<Player[]>([])
 const gameState = ref<GameState | null>(null)
+const game = ref<Game | null>(null)
 
 const initializeGame = async () => {
   try {
     const response = await axios.get(`/api/game/${gameId.value}/state`)
-    const {game, messages: gameMessages, players: gamePlayers} = response.data
+    const {game: gameData, messages: gameMessages, players: gamePlayers} = response.data
 
     // Check if game exists
-    if (!game) {
+    if (!gameData) {
       console.error('Game not found')
       router.push('/')
       return
@@ -47,7 +48,8 @@ const initializeGame = async () => {
     // Set initial state
     messages.value = gameMessages
     players.value = gamePlayers
-    gameState.value = game.game_state
+    gameState.value = gameData.game_state
+    game.value = gameData
 
     // If we don't have a valid player ID and this is a game with a human player,
     // try to find the human player or redirect
@@ -98,6 +100,7 @@ const initializeWebSocket = () => {
       if (event.eventData.players) {
         players.value = event.eventData.players
       }
+      game.value = event.eventData.game
     }
   })
 }
