@@ -791,4 +791,103 @@ class GameLoopTest extends TestCase
             }
         }
     }
+
+    public function test_evil_wins_after_five_rejected_team_proposals(): void
+    {
+        $this->game->refresh();
+
+        $maxTurns = 20;
+        $turnCount = 0;
+        $gameEnded = false;
+        $game = $this->game;
+
+        $this->assertNotNull($this->game->currentLeader());
+
+        // Mock AI responses to always reject team proposals
+        Agent::shouldReceive('getChatResponse')->andReturn([
+            'message' => "I think Sam is Merlin",
+            'reasoning' => 'Test reasoning',
+            'team_proposal' => 'Max,Riley',
+            'vote' => false,
+            'mission_action' => true,
+            'assassination_target' => null,
+        ]);
+
+        while (!$gameEnded && $turnCount < $maxTurns) {
+            $turnCount++;
+
+            // Log current game state for debugging
+            $this->game->refresh();
+            $currentPhase = $this->game->current_phase;
+            $currentMission = $this->game->currentMission?->mission_number ?? 'None';
+
+            // Process game loop
+            $eligiblePlayers = $this->gameLoop->getEligiblePlayers($game);
+            foreach ($eligiblePlayers as $player) {
+                if (!$player->is_human) {
+                    $this->gameLoop->processAIPlayerTurn($game, $player);
+                }
+            }
+
+            $game->refresh();
+            $this->gameLoop->checkPhaseTransition($game);
+
+            // Refresh game state
+            $this->game->refresh();
+
+            // Check if game has ended
+            $gameEnded = $this->game->winner !== null;
+
+            if (!$gameEnded) {
+                $this->assertContains($this->game->current_phase,
+                    ['team_proposal', 'team_voting', 'mission']);
+
+                if ($this->game->currentMission) {
+                    $this->assertGreaterThanOrEqual(1, $this->game->currentMission->mission_number);
+                    $this->assertLessThanOrEqual(5, $this->game->currentMission->mission_number);
+                }
+            }
+            $gameEnded = $this->game->winner !== null || $this->game->current_phase === 'game_over';
+
+            if ($gameEnded) {
+                break;
+            }
+        }
+
+        $this->assertNotNull($this->game->winner, "Game should have a winner, game is still in current_phase: " . $this->game->current_phase . " and mission: " . $this->game->currentMission->mission_number . ' and had ' . $turnCount . ' turns');
+        $this->assertEquals('evil', $this->game->winner);
+
+        // Assert game completed within reasonable number of turns
+        $this->assertLessThan($maxTurns, $turnCount, "Game did not complete within $maxTurns turns");
+
+        $mission = $this->game->missions()->where('mission_number', 1)->first();
+        // Verify exactly 5 rejected proposals on the first mission
+        $rejectedProposals = $mission->proposals()
+            ->where('status', 'rejected')
+            ->count();
+        $this->assertEquals(5, $rejectedProposals, "Should be exactly 5 rejected proposals");
+
+        // Verify the rejection event
+        $rejection_event = $this->game->gameEvents()
+            ->where('event_type', 'team_vote')
+            ->orderBy('created_at', 'desc')
+            ->first();
+        $this->assertNotNull($rejection_event);
+        $this->assertFalse($rejection_event->event_data['approved']);
+
+        foreach ($this->players as $player) {
+            $playerMessages = $player->messages()->pluck('content')->toArray();
+            $lastMessage = array_pop($playerMessages);
+
+            $string = '';
+            if ($player->role === 'merlin') {
+                $string = 'You are Merlin and the evil team has won. You were unable to stop the chaos of the team rejections. ';
+            }
+
+            // Everyone should see the game end message with all roles.
+            $this->assertEquals($string . "The game has ended. The minions of Mordred have won through team rejection chaos. Max was merlin. Alex was an assassin. Sam was a loyal_servant. Jordan was a loyal_servant. Riley was a minion.", $lastMessage, 'wrong message for role ' . $player->role);
+        }
+
+        Event::assertDispatched(GameStateUpdate::class);
+    }
 }
