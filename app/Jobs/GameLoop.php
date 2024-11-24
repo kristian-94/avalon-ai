@@ -466,6 +466,10 @@ class GameLoop implements ShouldQueue
 
                     if ($successfulMissions >= 3) {
                         $game->current_phase = 'assassination';
+
+                        // Set leader to assassin
+                        $assassin = $game->players()->where('role', 'assassin')->first();
+                        $game->current_leader_id = $assassin->id;
                         $game->save();
                     }
                 }

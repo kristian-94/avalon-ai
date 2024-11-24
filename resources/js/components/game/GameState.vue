@@ -7,7 +7,7 @@
 
     <!-- Game Progress -->
     <div v-if="gameState?.currentPhase === 'finished'" class="mb-4">
-      <VictoryScreen :game-state="gameState" :players="players" />
+      <VictoryScreen :game-state="gameState" :players="players"/>
     </div>
     <div v-else class="mb-4 bg-black/40 backdrop-blur-sm rounded-lg p-4">
       <div class="text-white/70">
@@ -48,16 +48,21 @@
     </div>
 
     <!-- Game Phase Banner -->
-    <div class="mb-6 bg-black/40 backdrop-blur-sm rounded-lg p-4">
-      <!-- Phase-specific info -->
-      <div v-if="gameState?.currentPhase === 'team_proposal'" class="mt-2 text-white/80">
-        Waiting for team leader {{ currentLeaderName }} to propose {{ requiredPlayerCount }} players
-      </div>
-      <div v-else-if="gameState?.currentPhase === 'team_voting'" class="mt-2 text-white/80">
-        Team proposed: {{ playersProposed }}
-      </div>
-      <div v-else-if="gameState?.currentPhase === 'mission'" class="mt-2 text-white/80">
-        Mission team: {{ gameState.currentMission.team.join(', ') }}
+    <div v-if="gameState?.currentPhase !== 'finished'">
+      <div class="mb-6 bg-black/40 backdrop-blur-sm rounded-lg p-4">
+        <!-- Phase-specific info -->
+        <div v-if="gameState?.currentPhase === 'team_proposal'" class="mt-2 text-white/80">
+          Waiting for team leader {{ currentLeaderName }} to propose {{ requiredPlayerCount }} players
+        </div>
+        <div v-else-if="gameState?.currentPhase === 'team_voting'" class="mt-2 text-white/80">
+          Team proposed: {{ playersProposed }}
+        </div>
+        <div v-else-if="gameState?.currentPhase === 'mission'" class="mt-2 text-white/80">
+          Mission team: {{ gameState.currentMission.team.join(', ') }}
+        </div>
+        <div v-else-if="gameState?.currentPhase === 'assassination'" class="mt-2 text-red-500 text-2xl text-center">
+          Assassination phase
+        </div>
       </div>
     </div>
 
@@ -68,7 +73,7 @@
 <script setup lang="ts">
 import PlayerArea from './PlayerArea.vue'
 import MissionTracker from "./MissionTracker.vue"
-import { computed } from 'vue'
+import {computed} from 'vue'
 import {GameState, Player} from "../../types/game";
 import VictoryScreen from './VictoryScreen.vue'
 
@@ -94,9 +99,9 @@ const props = defineProps<{
 }>()
 
 const phases = [
-  { id: 'team_proposal', label: 'Propose Team' },
-  { id: 'team_voting', label: 'Vote Team' },
-  { id: 'mission', label: 'Mission' }, // quick phase of just getting a vote, no discussions.
+  {id: 'team_proposal', label: 'Propose Team'},
+  {id: 'team_voting', label: 'Vote Team'},
+  {id: 'mission', label: 'Mission'}, // quick phase of just getting a vote, no discussions.
 ] as const
 
 // Helper to determine if a phase is complete in the current round

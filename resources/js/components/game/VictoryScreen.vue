@@ -8,6 +8,20 @@
       {{ gameState.winner === 'good' ? 'Good Triumphs!' : 'Evil Prevails!' }}
     </div>
 
+    <!-- Assassination Result (if good team won missions) -->
+    <div v-if="assassination" class="mt-4">
+      <div class="mt-2 text-lg">
+        <span class="text-red-400">{{ assassination.assassin.name }}</span>
+        assassinated
+        <span class="text-blue-400">{{ assassination.target.name }}</span>
+        <div class="mt-2 text-white/80">
+          {{ assassination.wasSuccessful ?
+            'Merlin was found! Evil wins through assassination!' :
+            'The real Merlin escaped! Good wins!' }}
+        </div>
+      </div>
+    </div>
+
     <!-- Mission Results Summary -->
     <div class="flex justify-center gap-4 my-4">
       <div class="text-center">
@@ -37,23 +51,10 @@
         </div>
       </div>
     </div>
-
-    <!-- Player Roles -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mt-8">
-      <div v-for="player in players" :key="player.id" class="bg-black/30 p-4 rounded-lg">
-        <div class="font-bold text-white">{{ player.name }}</div>
-        <div :class="[
-          'text-sm mt-1',
-          player.role?.includes('evil') ? 'text-red-400' : 'text-blue-400'
-        ]">
-          {{ player.roleLabel || 'Unknown Role' }}
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 
 const props = defineProps({
@@ -78,4 +79,5 @@ const goodMissions = computed(() =>
 const evilMissions = computed(() =>
     completedMissions.value.filter(m => m.status === 'fail').length
 )
+const assassination = computed(() => props.gameState.assassination)
 </script>

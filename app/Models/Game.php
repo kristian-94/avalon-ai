@@ -133,6 +133,29 @@ class Game extends Model
             ];
         })->values()->toArray();
 
+        $assassinationEvent = $game->gameEvents()->firstWhere('event_type', 'assassination');
+        $assassination = null;
+        if ($assassinationEvent) {
+            $eventData = $assassinationEvent->event_data;
+            $name = $eventData['assassin_target']['player_name'];
+            $targetId = $eventData['assassin_target']['player_id'];
+            $assassin = $game->players()->firstWhere('role', 'assassin');
+            $merlin = $game->players()->firstWhere('role', 'merlin');
+            $assassination = [
+                'assassin' => [
+                    'name' => $assassin->name,
+                    'id' => $assassin->id,
+                    'index' => $assassin->player_index,
+                ],
+                'target' => [
+                    'name' => $name,
+                    'id' => $targetId,
+                    'role' => $game->players()->firstWhere('id', $targetId)->role
+                ],
+                'wasSuccessful' => $targetId === $merlin->id
+            ];
+        }
+
         return [
             'game' => [
                 'id' => $game->id,
@@ -142,6 +165,7 @@ class Game extends Model
                     'currentLeader' => $game->current_leader_id,
                     'currentMission' => $currentMission,
                     'currentProposal' => $currentProposal,
+                    'assassination' => $assassination,
                     'missions' => $missions,
                     'proposals' => $proposals
                 ],
@@ -163,6 +187,12 @@ class Game extends Model
                 $game->fresh();
                 // Include role if the game is finished
                 $role = $game->current_phase === 'finished' ? $player->role : null;
+                // Otherwise include the role for evil players during final assassination phase
+                if ($game->current_phase === 'assassination' && $player->role === 'assassin') {
+                    $role = 'assassin';
+                } elseif ($game->current_phase === 'assassination' && $player->role === 'minion') {
+                    $role = 'minion';
+                }
                 $roleLabel = $role ? ($role === 'loyal_servant' ? 'Loyal Servant' : ucfirst($role)) : null;
                 if ($role === 'merlin') {
                     $roleLabel = 'Merlin';

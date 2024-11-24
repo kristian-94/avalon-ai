@@ -669,7 +669,9 @@ class GameLoopTest extends TestCase
         // Assertions
         $this->game->refresh();
         $this->assertEquals('assassination', $this->game->current_phase);
-        $this->assertEquals($oldLeaderId, $this->game->current_leader_id);
+        $this->assertNotEquals($oldLeaderId, $this->game->current_leader_id);
+        $assassin = $this->game->players()->where('role', 'assassin')->first();
+        $this->assertEquals($assassin->id, $this->game->current_leader_id);
         $this->assertNull($this->game->winner);
 
         // Verify mission results

@@ -47,10 +47,25 @@ export interface Proposal {
     votes: Record<number, boolean> // key is player index, value is boolean vote
 }
 
+export interface Assassination {
+    assassin: {
+        name: string
+        player_id: number
+        player_index: number
+    }
+    target: {
+        name: string
+        player_id: number
+        role: string
+    }
+    wasSuccessful: boolean
+}
+
 export interface GameState {
     currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission' | 'finished'
     turnCount: number
     currentLeader?: number
+    assassination?: Assassination
     currentMission?: {
         id: number
         required: number

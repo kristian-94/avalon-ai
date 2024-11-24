@@ -33,10 +33,28 @@
         {{ latestProposal.votes[player.player_index] ? '👍' : '👎' }}
       </div>
 
-      <div class="text-white/70 text-sm mt-1">
-        {{ player.is_human ? 'Human Player' : 'AI Agent' }}
+      <!-- Role & Type -->
+      <div class="flex items-center justify-between mt-1">
+        <div class="text-white/70 text-sm">
+          {{ player.is_human ? 'Human Player' : 'AI Agent' }}
+        </div>
+        <!-- Only show role if game is finished -->
+        <div v-if="isGameFinished" :class="[
+          'text-m font-medium',
+         player.role?.includes('minion') || player.role?.includes('assassin') ? 'text-red-400' : 'text-blue-400'
+        ]">
+          {{ player.roleLabel }}
+        </div>
+        <!-- During assassination phase, show evil players roles -->
+        <div v-if="props.gameState.currentPhase === 'assassination' && (player.role?.includes('minion') || player.role?.includes('assassin'))" :class="[
+          'text-m font-medium',
+          player.role?.includes('minion') || player.role?.includes('assassin') ? 'text-red-400' : 'text-blue-400'
+        ]">
+          {{ player.roleLabel }}
+        </div>
       </div>
 
+      <!-- Mission indicators -->
       <div class="flex gap-2 mt-2">
         <template v-for="mission in missions" :key="mission.mission_number">
           <div
@@ -54,6 +72,18 @@
             }`"
           />
         </template>
+      </div>
+
+      <!-- Assassination indicators -->
+      <div v-if="isGameFinished" class="mt-2 flex gap-2 justify-end">
+        <div v-if="player.id === assassination?.assassin.player_id"
+             class="text-xs text-red-400">
+          Assassin
+        </div>
+        <div v-if="player.id === assassination?.target.player_id"
+             class="text-xs text-yellow-400">
+          Target
+        </div>
       </div>
     </div>
   </div>
@@ -89,7 +119,8 @@ const currentProposal = computed(() => {
   if (!props.gameState.currentProposal) return null
   return props.gameState.currentProposal
 })
-
-
+const assassination = computed(() => props.gameState.assassination)
+const isGameFinished = computed(() => props.gameState.currentPhase === 'finished')
+console.log(props.gameState.currentPhase)
 
 </script>
