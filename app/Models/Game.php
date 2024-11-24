@@ -78,6 +78,97 @@ class Game extends Model
     {
         return $this->hasMany(GameEvent::class);
     }
+
+    public function renderFullGameState(): array
+    {
+        $game = $this;
+        $missions = $game->missions->map(function ($mission) {
+            return [
+                'id' => $mission->id,
+                'name' => "Mission {$mission->mission_number}",
+                'status' => $mission->status,
+                'required' => $mission->required_players,
+                'result' => $mission->status !== 'pending' ? [
+                    'success' => $mission->status === 'success',
+                    'team' => $mission->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
+                    'votes' => [
+                        'success' => $mission->success_votes,
+                        'fail' => $mission->fail_votes
+                    ]
+                ] : null
+            ];
+        });
+
+        // Format current proposal data
+        $currentProposal = null;
+        if ($game->currentProposal) {
+            $currentProposal = [
+                'team' => $game->currentProposal->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
+                'playerIndexes' => $game->currentProposal->teamMembers->map(fn($tm) => $tm->player->player_index)->values()->toArray(),
+                'votes' => $game->currentProposal->votes->mapWithKeys(function ($vote) {
+                    return [$vote->player_id => $vote->approved];
+                })->toArray()
+            ];
+        }
+
+        // Format current mission data
+        $currentMission = null;
+        if ($game->currentMission) {
+            $currentMission = [
+                'id' => $game->currentMission->id,
+                'required' => $game->currentMission->required_players,
+                'playerIndexes' => $game->currentMission->teamMembers->map(fn($tm) => $tm->player->player_index)->values()->toArray(),
+                'team' => $game->currentMission->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
+                'status' => $game->currentMission->status,
+            ];
+        }
+
+        $proposals = $game->proposals->map(function ($proposal) {
+            return [
+                'team' => $proposal->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
+                'playerIndexes' => $proposal->teamMembers->map(fn($tm) => $tm->player->player_index)->values()->toArray(),
+                'votes' => $proposal->votes ? $proposal->votes->mapWithKeys(function($vote) {
+                    return [$vote->player->player_index => $vote->approved];
+                })->toArray() : []
+            ];
+        })->values()->toArray();
+
+        return [
+            'game' => [
+                'id' => $game->id,
+                'game_state' => [
+                    'currentPhase' => $game->current_phase,
+                    'turnCount' => $game->turn_count,
+                    'currentLeader' => $game->current_leader_id,
+                    'currentMission' => $currentMission,
+                    'currentProposal' => $currentProposal,
+                    'missions' => $missions,
+                    'proposals' => $proposals
+                ],
+                'has_human_player' => $game->has_human_player
+            ],
+            'messages' => array_values($game->messages
+                ->reject(fn($message) => $message->message_type !== 'public_chat')
+                ->map(function ($message) {
+                    return [
+                        'id' => $message->id,
+                        'content' => $message->content,
+                        'player_id' => $message->player_id,
+                        'player_name' => $message->player ? $message->player->name : 'System',
+                        'created_at' => $message->created_at,
+                        'isSystem' => $message->player_id === null
+                    ];
+                })->toArray()),
+            'players' => $game->players->map(function ($player) {
+                return [
+                    'id' => $player->id,
+                    'name' => $player->name,
+                    'player_index' => $player->player_index,
+                    'is_human' => $player->is_human
+                ];
+            })
+        ];
+    }
 }
 
 

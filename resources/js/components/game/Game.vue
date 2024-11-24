@@ -19,21 +19,7 @@ import {useRoute, useRouter} from 'vue-router'
 import axios from 'axios'
 import ChatInterface from "../chat/ChatInterface.vue"
 import GameState from "./GameState.vue"
-
-interface Message {
-  id: number;
-  content: string;
-  player_id?: number;
-  player_name: string;
-  created_at: string;
-  isSystem?: boolean;
-}
-
-interface Player {
-  id: number;
-  name: string;
-  is_human: boolean;
-}
+import {Message, Player} from "../../types/game";
 
 const route = useRoute()
 const router = useRouter()
@@ -107,8 +93,8 @@ const initializeWebSocket = () => {
 
   // Listen for game state updates
   channel.listen('.GameStateUpdate', (event: any) => {
-    if (event.gameState) {
-      gameState.value = event.gameState
+    if (event) {
+      gameState.value = event.eventData.game.game_state
     }
   })
 }

@@ -58,7 +58,7 @@
       </div>
     </div>
 
-    <PlayerArea :players="players" :currentLeader="gameState?.currentLeader" :currentProposal="gameState?.currentProposal" :currentMission="gameState?.currentMission" :missions="gameState.missions"/>
+    <PlayerArea :players="players" :gameState="props.gameState"/>
   </div>
 </template>
 
@@ -66,6 +66,7 @@
 import PlayerArea from './PlayerArea.vue'
 import MissionTracker from "./MissionTracker.vue"
 import { computed } from 'vue'
+import {GameState, Player} from "../../types/game";
 
 const currentLeaderName = computed(() => {
   const leader = props.players.find(player => player.id === props.gameState.currentLeader)
@@ -81,48 +82,6 @@ const requiredPlayerCount = computed(() => {
 const playersProposed = computed(() => {
   return props.gameState?.currentProposal?.team.join(', ') || 'error';
 })
-
-interface MissionResult {
-  success: boolean
-  team: string[]
-  votes: {
-    success: number
-    fail: number
-  }
-}
-
-interface Mission {
-  id: number
-  name: string
-  status: 'pending' | 'success' | 'fail'
-  result: MissionResult | null
-  required: number
-}
-
-interface Player {
-  id: number
-  name: string
-  is_human: boolean
-  player_index: number
-}
-
-interface GameState {
-  currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission'
-  turnCount: number
-  currentLeader?: number
-  currentMission?: {
-    id: number
-    required: number
-    playerIndexes: number[]
-    team?: string[]
-  }
-  currentProposal?: {
-    team: string[]
-    playerIndexes: number[]
-    votes?: Record<string, boolean>
-  }
-  missions: Mission[]
-}
 
 const props = defineProps<{
   gameId: number

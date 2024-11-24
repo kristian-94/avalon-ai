@@ -11,50 +11,85 @@
     >
       <div class="flex items-center justify-between">
         <div class="text-white font-semibold">{{ player.name }}</div>
-        <div v-if="player.id === currentLeader" class="text-yellow-500 text-2xl">
-          👑
-        </div>
-        <div v-if="props.currentProposal?.playerIndexes?.includes(player.player_index)" class="text-blue-500 text-2xl">
-          🗡️
-        </div>
-        <div v-if="props.currentMission?.playerIndexes?.includes(player.player_index)" class="text-blue-500 text-2xl">
-          <span class="border-2 border-blue-500 rounded-full px-2 py-1">🗡️</span>
+        <div class="flex items-center gap-2">
+          <div v-if="player.id === currentLeader" class="text-yellow-500 text-2xl">
+            👑
+          </div>
+          <div v-if="currentProposal?.playerIndexes?.includes(player.player_index)" class="text-blue-500 text-2xl">
+            🗡️
+          </div>
+          <div v-if="props.gameState.currentMission?.playerIndexes?.includes(player.player_index)" class="text-blue-500 text-2xl">
+            <span class="border-2 border-blue-500 rounded-full px-2 py-1">🗡️</span>
+          </div>
         </div>
       </div>
+
+      <!-- Voting indicator, based on currentProposal votes. -->
+      <div
+          v-if="latestProposal?.votes && latestProposal.votes[player.player_index] !== undefined"
+          class="w-3 h-3 transition-all duration-300"
+          :title="latestProposal.votes[player.player_index] ? 'Approve' : 'Reject'"
+      >
+        {{ latestProposal.votes[player.player_index] ? '👍' : '👎' }}
+      </div>
+
       <div class="text-white/70 text-sm mt-1">
         {{ player.is_human ? 'Human Player' : 'AI Agent' }}
+      </div>
+
+      <div class="flex gap-2 mt-2">
+        <template v-for="mission in missions" :key="mission.mission_number">
+          <div
+              v-if="mission.status !== 'pending' && mission.result?.team?.includes(player.name)"
+              :class="[
+              'w-3 h-3 rounded-full transition-all duration-300',
+              mission.status === 'success' ? 'bg-green-500' :
+              mission.status === 'fail' ? 'bg-red-500' :
+              'bg-gray-500'
+            ]"
+              :title="`Mission ${mission.mission_number}: ${
+              mission.status === 'success' ? 'Success' :
+              mission.status === 'fail' ? 'Failed' :
+              'Pending'
+            }`"
+          />
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import {Mission} from "../../types/game";
-
-interface Player {
-  id: number
-  name: string
-  is_human: boolean
-}
+import {Player, GameState} from "../../types/game";
+import {computed} from "vue";
 
 const props = defineProps<{
   players: Player[]
-  currentLeader?: number // This is the player index, not the player ID
-  currentProposal?: {
-    team: string[]
-    playerIndexes: number[]
-    votes?: Record<string, boolean>
-  }
-  currentMission?: {
-    team: string[]
-    playerIndexes: number[]
-    votes?: Record<string, boolean>
-    successes?: number
-    failures?: number
-  }
-  missions: Mission[]
+  gameState: GameState
 }>()
 
-console.log('current mission: ', props.currentMission)
+const latestProposal = computed(() => {
+  if (!props.gameState.proposals || props.gameState.proposals.length === 0) return null
+  if (!props.gameState.currentMission) return null
+  if (props.gameState.currentPhase !== 'mission') return null
+  return props.gameState.proposals[props.gameState.proposals.length - 1]
+})
+
+const currentLeader = computed(() => {
+  if (!props.gameState.currentLeader) return null
+  return props.gameState.currentLeader
+})
+
+const missions = computed(() => {
+  if (!props.gameState.missions) return []
+  return props.gameState.missions
+})
+
+const currentProposal = computed(() => {
+  if (!props.gameState.currentProposal) return null
+  return props.gameState.currentProposal
+})
+
+
 
 </script>

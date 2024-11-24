@@ -14,15 +14,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import ChatMessage from './ChatMessage.vue'
-
-interface Message {
-  id: number
-  content: string
-  player_id?: number
-  player_name: string
-  created_at: string
-  isSystem?: boolean
-}
+import {Message} from "../../types/game";
 
 const props = defineProps<{
   messages: Message[]

@@ -39,45 +39,8 @@ class GameStateUpdate implements ShouldBroadcast
 
     public function broadcastWith()
     {
-        $missions = $this->game->missions->map(function ($mission) {
-            return [
-                'id' => $mission->id,
-                'name' => "Mission {$mission->mission_number}",
-                'status' => $mission->status,
-                'required' => $mission->required_players,
-                'result' => $mission->status !== 'pending' ? [
-                    'success' => $mission->status === 'success',
-                    'team' => $mission->teamMembers->map(fn($tm) => $tm->player->name)->toArray(),
-                    'votes' => [
-                        'success' => $mission->success_votes,
-                        'fail' => $mission->fail_votes
-                    ]
-                ] : null
-            ];
-        });
-
-        $currentProposal = $this->game->currentProposal ? [
-            'team' => $this->game->currentProposal->teamMembers->map(fn($tm) => $tm->player->name)->toArray(),
-            'playerIndexes' => $this->game->currentProposal->teamMembers->map(fn($tm) => $tm->player->player_index)->toArray(),
-            'votes' => $this->game->currentProposal->status !== 'pending'
-                ? $this->game->currentProposal->votes->mapWithKeys(fn($vote) => [$vote->player_id => $vote->approved])->toArray()
-                : null
-        ] : null;
-
         return [
-            'gameState' => [
-                'currentPhase' => $this->game->current_phase,
-                'turnCount' => $this->game->turn_count,
-                'currentLeader' => $this->game->current_leader_id,
-                'currentMission' => $this->game->currentMission ? [
-                    'id' => $this->game->currentMission->id,
-                    'required' => $this->game->currentMission->required_players,
-                    'playerIndexes' => $this->game->currentMission->teamMembers->map(fn($tm) => $tm->player->player_index)->toArray(),
-                    'team' => $this->game->currentMission->teamMembers->map(fn($tm) => $tm->player->name)->toArray()
-                ] : null,
-                'currentProposal' => $currentProposal,
-                'missions' => $missions->toArray()
-            ]
+            'eventData' => $this->game->renderFullGameState(),
         ];
     }
 }
