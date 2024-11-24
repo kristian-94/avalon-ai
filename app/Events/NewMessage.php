@@ -40,7 +40,8 @@ class NewMessage implements ShouldBroadcast
             'id' => $this->message->id,
             'content' => $this->message->content,
             'player_id' => $this->message->player_id,
-            'player_name' => $this->message->player->name,
+            'player_name' => $this->message->player?->name ?? 'System',
+            'isSystem' => $this->message->player_id === null,
             'created_at' => $this->message->created_at
         ];
     }

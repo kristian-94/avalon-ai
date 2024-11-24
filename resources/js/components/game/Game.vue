@@ -99,7 +99,7 @@ const initializeWebSocket = () => {
       player_name: event.player_name || 'Unknown',
       content: event.content,
       created_at: event.created_at,
-      isSystem: event.is_system,
+      isSystem: event.isSystem,
       player_id: event.player_id,
     }
     addMessage(newMessage)
@@ -107,7 +107,6 @@ const initializeWebSocket = () => {
 
   // Listen for game state updates
   channel.listen('.GameStateUpdate', (event: any) => {
-    console.log('Received game state update:', event)
     if (event.gameState) {
       gameState.value = event.gameState
     }

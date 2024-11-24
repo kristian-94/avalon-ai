@@ -260,11 +260,12 @@ class GameLoop implements ShouldQueue
                         'content' => 'Private thought: ' . $msg->content
                     ];
                 }
-                // Public chat: assistant for current player, user for others
+                // Public chat: assistant for current player, user for others, and system for game events
                 if ($msg->message_type === 'public_chat') {
+                    $playerName = $msg->player?->name ?? 'Game event';
                     return [
                         'role' => $msg->player_id === $player->id ? 'assistant' : 'user',
-                        'content' => "{$msg->player->name}: {$msg->content}"
+                        'content' => "{$playerName}: {$msg->content}"
                     ];
                 }
 
@@ -509,6 +510,24 @@ class GameLoop implements ShouldQueue
                 ]);
             }
         }
+
+        $gamePhaseLabel = match ($game->current_phase) {
+            'team_proposal' => 'Team Proposal',
+            'team_voting' => 'Team Voting',
+            'mission' => 'Mission',
+            'assassination' => 'Assassination',
+            default => 'Unknown'
+        };
+
+        // Add a system message public_chat with what just happened.
+        $publicmessage = Message::create([
+            'game_id' => $game->id,
+            'player_id' => null,
+            'message_type' => 'public_chat',
+            'content' => $gamePhaseLabel . ' has begun.'
+        ]);
+
+        broadcast(new NewMessage($publicmessage));
 
         if (isset($failedMissions) && $failedMissions >= 3) {
             $this->endGame($game, 'evil');

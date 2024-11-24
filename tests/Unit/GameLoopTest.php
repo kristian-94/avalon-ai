@@ -45,7 +45,7 @@ class GameLoopTest extends TestCase
 
         $this->game = GameSetupService::initializeGame(0);
         $this->players = Player::where('game_id', $this->game->id)->get()->all();
-        $this->assertCount(5, Message::all());
+        $this->assertCount(6, Message::all());
         $this->assertCount(5, Player::all());
         $this->assertCount(1, GameEvent::all());
         $this->assertCount(5, Mission::all());

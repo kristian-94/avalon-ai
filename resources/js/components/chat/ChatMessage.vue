@@ -8,8 +8,8 @@
           ? 'bg-blue-500/80 text-white self-end'
           : 'bg-gray-500/80 text-white self-start'
     ]">
-      <p class="text-sm font-semibold">{{ message.player_name }}</p>
-      <p>{{ message.content }}</p>
+      <p v-if="!message.isSystem" class="text-sm font-semibold">{{ message.player_name }}</p>
+      <p v-html="message.isSystem ? '<i>' + message.content + '</i>' : message.content"></p>
     </div>
   </div>
 </template>

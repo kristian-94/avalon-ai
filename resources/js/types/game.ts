@@ -7,10 +7,13 @@ export interface Player {
     isLeader: boolean
 }
 
-export interface MissionResult {
+interface MissionResult {
     success: boolean
-    team: PlayerName[]
-    // Optional: could add number of fails if we want
+    team: string[]
+    votes: {
+        success: number
+        fail: number
+    }
 }
 
 export interface Mission {

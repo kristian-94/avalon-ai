@@ -54,11 +54,11 @@
         Team proposed: {{ playersProposed }}
       </div>
       <div v-else-if="gameState?.currentPhase === 'mission'" class="mt-2 text-white/80">
-        Mission team: {{ gameState.currentMission }}
+        Mission team: {{ gameState.currentMission.team.join(', ') }}
       </div>
     </div>
 
-    <PlayerArea :players="players" :currentLeader="gameState?.currentLeader" :currentProposal="gameState?.currentProposal" />
+    <PlayerArea :players="players" :currentLeader="gameState?.currentLeader" :currentProposal="gameState?.currentProposal" :currentMission="gameState?.currentMission" :missions="gameState.missions"/>
   </div>
 </template>
 
@@ -113,6 +113,7 @@ interface GameState {
   currentMission?: {
     id: number
     required: number
+    playerIndexes: number[]
     team?: string[]
   }
   currentProposal?: {

@@ -17,6 +17,9 @@
         <div v-if="props.currentProposal?.playerIndexes?.includes(player.player_index)" class="text-blue-500 text-2xl">
           🗡️
         </div>
+        <div v-if="props.currentMission?.playerIndexes?.includes(player.player_index)" class="text-blue-500 text-2xl">
+          <span class="border-2 border-blue-500 rounded-full px-2 py-1">🗡️</span>
+        </div>
       </div>
       <div class="text-white/70 text-sm mt-1">
         {{ player.is_human ? 'Human Player' : 'AI Agent' }}
@@ -26,6 +29,8 @@
 </template>
 
 <script setup lang="ts">
+import {Mission} from "../../types/game";
+
 interface Player {
   id: number
   name: string
@@ -40,6 +45,16 @@ const props = defineProps<{
     playerIndexes: number[]
     votes?: Record<string, boolean>
   }
+  currentMission?: {
+    team: string[]
+    playerIndexes: number[]
+    votes?: Record<string, boolean>
+    successes?: number
+    failures?: number
+  }
+  missions: Mission[]
 }>()
+
+console.log('current mission: ', props.currentMission)
 
 </script>

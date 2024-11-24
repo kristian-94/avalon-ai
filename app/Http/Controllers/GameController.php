@@ -129,7 +129,7 @@ class GameController extends Controller
         ]);
     }
 
-    public function getGameState(Request $request, $gameId): JsonResponse
+    public function getGameState($gameId): JsonResponse
     {
         try {
             $game = Game::with([
@@ -184,6 +184,7 @@ class GameController extends Controller
                 $currentMission = [
                     'id' => $game->currentMission->id,
                     'required' => $game->currentMission->required_players,
+                    'playerIndexes' => $game->currentMission->teamMembers->map(fn($tm) => $tm->player->player_index)->values()->toArray(),
                     'team' => $game->currentMission->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray()
                 ];
             }
@@ -201,16 +202,18 @@ class GameController extends Controller
                     ],
                     'has_human_player' => $game->has_human_player
                 ],
-                'messages' => $game->messages->map(function ($message) {
-                    return [
-                        'id' => $message->id,
-                        'content' => $message->content,
-                        'player_id' => $message->player_id,
-                        'player_name' => $message->player ? $message->player->name : 'System',
-                        'created_at' => $message->created_at,
-                        'isSystem' => $message->message_type === 'game_event'
-                    ];
-                }),
+                'messages' => array_values($game->messages
+                    ->reject(fn($message) => $message->message_type !== 'public_chat')
+                    ->map(function ($message) {
+                        return [
+                            'id' => $message->id,
+                            'content' => $message->content,
+                            'player_id' => $message->player_id,
+                            'player_name' => $message->player ? $message->player->name : 'System',
+                            'created_at' => $message->created_at,
+                            'isSystem' => $message->player_id === null
+                        ];
+                    })->toArray()),
                 'players' => $game->players->map(function ($player) {
                     return [
                         'id' => $player->id,

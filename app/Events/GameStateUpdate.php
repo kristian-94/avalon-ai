@@ -72,6 +72,7 @@ class GameStateUpdate implements ShouldBroadcast
                 'currentMission' => $this->game->currentMission ? [
                     'id' => $this->game->currentMission->id,
                     'required' => $this->game->currentMission->required_players,
+                    'playerIndexes' => $this->game->currentMission->teamMembers->map(fn($tm) => $tm->player->player_index)->toArray(),
                     'team' => $this->game->currentMission->teamMembers->map(fn($tm) => $tm->player->name)->toArray()
                 ] : null,
                 'currentProposal' => $currentProposal,

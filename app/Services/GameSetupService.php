@@ -21,7 +21,7 @@ class GameSetupService
     public static function initializeGame($humanPlayers = 0): Game
     {
         $mode = $humanPlayers > 0 ? 'play' : 'watch';
-        DB::transaction(function () use ($mode, &$game) {
+        DB::transaction(static function () use ($mode, &$game) {
             $roles = ['merlin', 'assassin', 'loyal_servant', 'loyal_servant', 'minion'];
 
             // 1. Create the game with structured data
@@ -102,6 +102,14 @@ class GameSetupService
                     ]);
                 }
             }
+
+            // Create a system message public chat for every player
+            Message::create([
+                'game_id' => $game->id,
+                'player_id' => null, // System message
+                'message_type' => 'public_chat',
+                'content' => 'Welcome to Avalon. The game is about to begin.'
+            ]);
 
             // 4. Create game start event
             GameEvent::create([
