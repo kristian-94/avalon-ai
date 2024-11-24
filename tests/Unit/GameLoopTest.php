@@ -2,12 +2,14 @@
 
 namespace Tests\Unit;
 
+use App\Facades\Agent;
 use App\Jobs\GameLoop;
 use App\Models\GameEvent;
 use App\Models\Mission;
 use App\Models\MissionProposalMember;
 use App\Models\MissionTeamMember;
 use App\Services\GameSetupService;
+use App\Services\BasicAgentService;
 use Tests\TestCase;
 use App\Models\Game;
 use App\Models\Player;
@@ -52,6 +54,8 @@ class GameLoopTest extends TestCase
         $this->assertCount(0, MissionProposalMember::all());
         $this->assertCount(0, MissionTeamMember::all());
         $this->assertCount(5, $this->players);
+        $this->assertSame(null, $this->game->current_leader_id);
+        $this->assertNull($this->game->currentLeader);
 
         $this->gameLoop = new GameLoop($this->game->id);
     }
@@ -389,6 +393,122 @@ class GameLoopTest extends TestCase
         Event::assertDispatched(GameStateUpdate::class);
     }
 
+    public function test_evil_wins_when_assassin_correctly_identifies_merlin()
+    {
+        // Set the game state to assassination phase
+        $this->game->update([
+            'current_phase' => 'assassination',
+            'current_leader_id' => $this->players[1]->id // Assuming player 1 is assassin
+        ]);
+
+        // Find Merlin and Assassin
+        $merlin = $this->game->players()->firstWhere('role', 'merlin');
+        $assassin = $this->game->players()->firstWhere('role', 'assassin');
+
+        $eligiblePlayers = $this->gameLoop->getEligiblePlayers($this->game);
+        $this->assertCount(1, $eligiblePlayers); // Only the assassin is eligible to
+        foreach ($eligiblePlayers as $player) {
+            if (!$player->is_human) {
+                $this->gameLoop->processAIPlayerTurn($this->game, $player);
+            }
+        }
+        $this->game->refresh();
+        $this->assertEquals(null, $this->game->winner);
+        $this->gameLoop->checkPhaseTransition($this->game);
+
+        // Verify game state
+        $this->game->refresh();
+        $this->assertEquals('evil', $this->game->winner);
+        $this->assertEquals('assassination', $this->game->current_phase);
+
+        $assassination_event = $this->game->gameEvents()->where('event_type', 'assassination')->first();
+        $assassin_target = $assassination_event->event_data['assassin_target']['player_id'];
+        $this->assertEquals($merlin->id, $assassin_target);
+
+        // Verify end game messages
+        foreach ($this->players as $player) {
+            $playerMessages = $player->messages()->pluck('content')->toArray();
+            $lastMessage = array_pop($playerMessages);
+            $secondToLastMessage = array_pop($playerMessages);
+
+            $string = '';
+            if ($player->role === 'merlin') {
+                $string = 'You are Merlin and were too obvious. The evil team has won by killing you. ';
+            }
+
+            // Everyone should see the game end message with all roles.
+            $this->assertEquals($string . "The game has ended. The minions of Mordred have won. The Assassin was able to identify Merlin. Max was merlin. Alex was an assassin. Sam was a loyal_servant. Jordan was a loyal_servant. Riley was a minion.", $lastMessage, 'wrong message for role ' . $player->role);
+        }
+
+        Event::assertDispatched(GameStateUpdate::class);
+    }
+
+    public function test_good_wins_when_assassin_fails_to_identify_merlin()
+    {
+        // Set the game state to assassination phase
+        $this->game->update([
+            'current_phase' => 'assassination',
+            'current_leader_id' => $this->players[1]->id // Assuming player 1 is assassin
+        ]);
+
+        $loyalServant = $this->game->players()->firstWhere('role', 'loyal_servant');
+
+        // Mock the Agent facade
+        Agent::shouldReceive('getChatResponse')
+            ->once()
+            ->andReturn([
+                'message' => "I think Sam is Merlin",
+                'reasoning' => 'Test reasoning',
+                'team_proposal' => '',
+                'vote' => true,
+                'mission_action' => true,
+                'assassination_target' => $loyalServant->name
+            ]);
+
+        // Find Merlin and Assassin
+        $merlin = $this->game->players()->firstWhere('role', 'merlin');
+        $assassin = $this->game->players()->firstWhere('role', 'assassin');
+
+        $eligiblePlayers = $this->gameLoop->getEligiblePlayers($this->game);
+        $this->assertCount(1, $eligiblePlayers); // Only the assassin is eligible to
+        foreach ($eligiblePlayers as $player) {
+            if (!$player->is_human) {
+                $this->gameLoop->processAIPlayerTurn($this->game, $player);
+            }
+        }
+        $this->game->refresh();
+        $this->assertEquals(null, $this->game->winner);
+        $this->gameLoop->checkPhaseTransition($this->game);
+
+        // Verify game state
+        $this->game->refresh();
+        $this->assertEquals('good', $this->game->winner);
+        $this->assertEquals('assassination', $this->game->current_phase);
+
+        // Verify assassination event targeted wrong player
+        $assassination_event = $this->game->gameEvents()->where('event_type', 'assassination')->first();
+        $assassin_target = $assassination_event->event_data['assassin_target']['player_id'];
+        $this->assertNotEquals($merlin->id, $assassin_target);
+        $this->assertNotNull($assassin_target);
+
+        // Verify end game messages
+        foreach ($this->players as $player) {
+            $playerMessages = $player->messages()->pluck('content')->toArray();
+            $lastMessage = array_pop($playerMessages);
+            $secondToLastMessage = array_pop($playerMessages);
+
+            $string = '';
+            if ($player->role === 'merlin') {
+                $string = 'You are Merlin and the good team has won. You were able to identify all the evil players. ';
+            }
+
+            // Everyone should see the game end message with all roles
+            $this->assertEquals($string . "The game has ended. The loyal servants have won. The Assassin was unable to identify Merlin. Max was merlin. Alex was an assassin. Sam was a loyal_servant. Jordan was a loyal_servant. Riley was a minion.", $lastMessage, 'wrong message for role ' . $player->role);
+        }
+
+        Event::assertDispatched(GameStateUpdate::class);
+    }
+
     public function test_assassination_phase_begins_after_good_wins_three_missions()
     {
         // Helper function to identify evil players (assassin and minion)
@@ -574,5 +694,101 @@ class GameLoopTest extends TestCase
         }
 
         Event::assertDispatched(GameStateUpdate::class);
+    }
+
+    public function test_complete_game_plays_automatically()
+    {
+        $this->game->refresh();
+
+        $maxTurns = 20;
+        $turnCount = 0;
+        $gameEnded = false;
+        $game = $this->game;
+
+        $this->assertNotNull($this->game->currentLeader());
+
+        while (!$gameEnded && $turnCount < $maxTurns) {
+            $turnCount++;
+
+            // Log current game state for debugging
+            $this->game->refresh();
+            $currentPhase = $this->game->current_phase;
+            $currentMission = $this->game->currentMission?->mission_number ?? 'None';
+
+            // Process game loop
+            $eligiblePlayers = $this->gameLoop->getEligiblePlayers($game);
+            foreach ($eligiblePlayers as $player) {
+                if (!$player->is_human) {
+                    $this->gameLoop->processAIPlayerTurn($game, $player);
+                }
+            }
+            $game->refresh();
+            if ($currentPhase !== 'setup') {
+                $this->assertNotNull($game->currentLeader, "Leader should always be set after setup. It is turn $turnCount, phase $currentPhase, mission $currentMission");
+                $this->assertIsString($game->currentLeader->name);
+            }
+            $this->gameLoop->checkPhaseTransition($game);
+            // Finished game loop.
+
+            // Refresh game state
+            $this->game->refresh();
+
+            // Check if game has ended
+            $gameEnded = $this->game->winner !== null || $this->game->current_phase === 'game_over';
+
+            // Optional: Add assertions about valid state transitions
+            if (!$gameEnded) {
+                $this->assertContains($this->game->current_phase, ['team_proposal', 'team_voting', 'mission', 'assassination']);
+                if ($this->game->currentMission) {
+                    $this->assertGreaterThanOrEqual(1, $this->game->currentMission->mission_number);
+                    $this->assertLessThanOrEqual(5, $this->game->currentMission->mission_number);
+                }
+            }
+        }
+
+        $this->assertNotNull($this->game->winner, "Game should have a winner, game is still in current_phase: " . $this->game->current_phase . " and mission: " . $this->game->currentMission->mission_number);
+
+        // Assert game completed within reasonable number of turns
+        $this->assertLessThan($maxTurns, $turnCount, "Game did not complete within $maxTurns turns");
+
+        // Assert game reached a valid end state
+        $this->assertTrue($gameEnded, "Game should have reached an end state");
+
+        // If game ended in assassination phase
+        if ($this->game->current_phase === 'assassination') {
+            $this->assertNotNull($this->game->currentMission);
+            $successfulMissions = $this->game->missions()
+                ->where('status', 'success')
+                ->count();
+            $this->assertEquals(3, $successfulMissions, "Should be exactly 3 successful missions before assassination");
+        }
+
+        // If game ended with a winner
+        if ($this->game->winner) {
+            $this->assertContains($this->game->winner, ['good', 'evil'], "Winner should be either good or evil");
+
+            // Verify final game state based on winner
+            if ($this->game->winner === 'good') {
+                // Good team won through failed assassination
+                $this->assertNotNull($this->game->assassinationTarget);
+                $this->assertNotEquals(
+                    $this->game->players()->where('role', 'merlin')->first()->id,
+                    $this->game->assassinationTarget
+                );
+            } else {
+                // Evil team won either through failed missions or successful assassination
+                $failedMissions = $this->game->missions()
+                    ->where('status', 'fail')
+                    ->count();
+
+                $successfulAssassination = $this->game->assassinationTarget ===
+                    $this->game->players()->where('role', 'merlin')->first()->id;
+
+                $this->assertTrue(
+                    $failedMissions >= 3 || $successfulAssassination,
+                    "Evil should win through either 3 failed missions or correct assassination"
+                );
+            }
+        }
     }
 }

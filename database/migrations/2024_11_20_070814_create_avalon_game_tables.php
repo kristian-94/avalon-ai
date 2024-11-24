@@ -154,7 +154,7 @@ return new class extends Migration {
                 'team_vote',
                 'mission_vote',
                 'mission_complete',
-                'assassination_attempt',
+                'assassination',
                 'game_end'
             ]);
             $table->foreignId('player_id')->nullable()

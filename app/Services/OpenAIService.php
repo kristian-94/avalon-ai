@@ -47,6 +47,10 @@ class OpenAIService implements AgentService
                                     'type' => 'string',
                                     'description' => 'Comma separated list of player names for the team proposal, no spaces. Example: "Max,Riley"'
                                 ],
+                                'assassination_target' => [
+                                    'type' => 'string',
+                                    'description' => 'A single player name to assassinate, this is who you think Merlin is if you are the Assassin'
+                                ],
                                 'mission_action' => [
                                     'type' => 'boolean',
                                     'description' => 'Optional mission action'

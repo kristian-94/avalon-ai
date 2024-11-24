@@ -6,6 +6,18 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property Player $currentLeader
+ * @property Mission $currentMission
+ * @property MissionProposal $currentProposal
+ * @property Player[] $players
+ * @property Mission[] $missions
+ * @property MissionProposal[] $proposals
+ * @property Message[] $messages
+ * @property GameEvent[] $gameEvents
+ * @property int $id
+ * @property string current_phase
+ */
 class Game extends Model
 {
     protected $fillable = [
