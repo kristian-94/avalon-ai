@@ -5,8 +5,11 @@
         :currentMissionId="gameState?.currentMission?.id || null"
     />
 
-    <!-- Phase Timeline -->
-    <div class="mb-4 bg-black/40 backdrop-blur-sm rounded-lg p-4">
+    <!-- Game Progress -->
+    <div v-if="gameState?.currentPhase === 'finished'" class="mb-4">
+      <VictoryScreen :game-state="gameState" :players="players" />
+    </div>
+    <div v-else class="mb-4 bg-black/40 backdrop-blur-sm rounded-lg p-4">
       <div class="text-white/70">
 
         <div class="flex-1 relative flex items-center justify-between">
@@ -67,6 +70,7 @@ import PlayerArea from './PlayerArea.vue'
 import MissionTracker from "./MissionTracker.vue"
 import { computed } from 'vue'
 import {GameState, Player} from "../../types/game";
+import VictoryScreen from './VictoryScreen.vue'
 
 const currentLeaderName = computed(() => {
   const leader = props.players.find(player => player.id === props.gameState.currentLeader)
@@ -105,15 +109,6 @@ const isPhaseComplete = (phaseId: string) => {
   return thisPhaseIndex < currentPhaseIndex
 }
 
-// Format the phase for display
-const formatPhase = (phase?: string) => {
-  if (!phase) return ''
-  const formats: Record<string, string> = {
-    setup: 'Game Setup',
-    team_proposal: 'Proposing Team',
-    team_voting: 'Voting on Team',
-    mission: 'Mission in Progress',
-  }
-  return formats[phase] || phase
-}
+console.log('GameState', props.gameState.currentPhase)
+
 </script>

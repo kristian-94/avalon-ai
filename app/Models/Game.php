@@ -159,12 +159,24 @@ class Game extends Model
                         'isSystem' => $message->player_id === null
                     ];
                 })->toArray()),
-            'players' => $game->players->map(function ($player) {
+            'players' => $game->players->map(function ($player) use ($game) {
+                // Include role if the game is finished
+                $role = $game->winner ? $player->role : null;
+                $roleLabel = $role ? ($role === 'loyal_servant' ? 'Loyal Servant' : ucfirst($role)) : null;
+                if ($role === 'merlin') {
+                    $roleLabel = 'Merlin';
+                } elseif ($role === 'minion') {
+                    $roleLabel = 'Minion of Mordred';
+                } elseif ($role === 'assassin') {
+                    $roleLabel = 'Assassin';
+                }
                 return [
                     'id' => $player->id,
                     'name' => $player->name,
                     'player_index' => $player->player_index,
-                    'is_human' => $player->is_human
+                    'role' => $role,
+                    'roleLabel' => $roleLabel,
+                    'is_human' => $player->is_human,
                 ];
             })
         ];

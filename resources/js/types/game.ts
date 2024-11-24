@@ -48,7 +48,7 @@ export interface Proposal {
 }
 
 export interface GameState {
-    currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission'
+    currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission' | 'finished'
     turnCount: number
     currentLeader?: number
     currentMission?: {

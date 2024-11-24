@@ -19,6 +19,7 @@ return new class extends Migration {
                 'team_proposal',
                 'team_voting',
                 'mission',
+                'finished',
             ])->default('setup');
             $table->integer('turn_count')->default(0);
             $table->enum('winner', ['good', 'evil'])->nullable();

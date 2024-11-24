@@ -419,7 +419,7 @@ class GameLoopTest extends TestCase
         // Verify game state
         $this->game->refresh();
         $this->assertEquals('evil', $this->game->winner);
-        $this->assertEquals('assassination', $this->game->current_phase);
+        $this->assertEquals('finished', $this->game->current_phase);
 
         $assassination_event = $this->game->gameEvents()->where('event_type', 'assassination')->first();
         $assassin_target = $assassination_event->event_data['assassin_target']['player_id'];
@@ -483,7 +483,7 @@ class GameLoopTest extends TestCase
         // Verify game state
         $this->game->refresh();
         $this->assertEquals('good', $this->game->winner);
-        $this->assertEquals('assassination', $this->game->current_phase);
+        $this->assertEquals('finished', $this->game->current_phase);
 
         // Verify assassination event targeted wrong player
         $assassination_event = $this->game->gameEvents()->where('event_type', 'assassination')->first();

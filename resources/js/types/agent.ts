@@ -9,6 +9,7 @@ export interface Agent {
     id: number
     name: string
     role: Role
+    roleLabel: string
     isHuman: boolean
     roleKnowledge: RoleKnowledge
     privateHistory: string[]  // Internal thoughts/reasoning

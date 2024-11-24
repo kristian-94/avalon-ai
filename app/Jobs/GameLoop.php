@@ -62,6 +62,7 @@ class GameLoop implements ShouldQueue
     {
         $game->update([
             'ended_at' => now(),
+            'current_phase' => 'finished',
             'winner' => $winner
         ]);
 
