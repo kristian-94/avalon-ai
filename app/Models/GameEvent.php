@@ -11,14 +11,14 @@ class GameEvent extends Model
 
     protected $casts = [
         'event_data' => 'array',
-        'created_at' => 'datetime'
+        'created_at' => 'datetime',
     ];
 
     protected $fillable = [
         'game_id',
         'event_type',
         'player_id',
-        'event_data'
+        'event_data',
     ];
 
     public function game()
@@ -31,4 +31,3 @@ class GameEvent extends Model
         return $this->belongsTo(Player::class);
     }
 }
-

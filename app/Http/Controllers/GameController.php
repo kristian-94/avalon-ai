@@ -6,8 +6,8 @@ use App\Events\GameStateUpdate;
 use App\Events\NewMessage;
 use App\Jobs\GameLoop;
 use App\Models\Game;
-use App\Models\Player;
 use App\Models\Message;
+use App\Models\Player;
 use App\Services\GameSetupService;
 use App\Services\OpenAIService;
 use Exception;
@@ -19,7 +19,7 @@ class GameController extends Controller
     public function initialize(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'mode' => 'required|string|in:play,watch'
+            'mode' => 'required|string|in:play,watch',
         ]);
 
         $mode = $validated['mode'];
@@ -30,7 +30,7 @@ class GameController extends Controller
         } catch (Exception $e) {
             return response()->json([
                 'message' => 'Failed to initialize game',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
 
@@ -41,7 +41,7 @@ class GameController extends Controller
             'message' => 'Welcome to Avalon! The game will begin shortly.',
             'gameId' => $game->id,
             'players' => $game->players,
-            'playerId' => $game->has_human_player ? $game->players->firstWhere('is_human')->id : null
+            'playerId' => $game->has_human_player ? $game->players->firstWhere('is_human')->id : null,
         ]);
     }
 
@@ -50,7 +50,7 @@ class GameController extends Controller
         $validated = $request->validate([
             'gameId' => 'required|integer',
             'playerId' => 'required|integer',
-            'content' => 'required|string'
+            'content' => 'required|string',
         ]);
 
         $game = Game::findOrFail($validated['gameId']);
@@ -60,14 +60,14 @@ class GameController extends Controller
             'game_id' => $validated['gameId'],
             'player_id' => $validated['playerId'],
             'message_type' => 'public_chat',
-            'content' => $validated['content']
+            'content' => $validated['content'],
         ]);
 
         broadcast(new NewMessage($message));
 
         return response()->json([
             'result' => 'Chat message sent',
-            'message' => $message
+            'message' => $message,
         ]);
     }
 
@@ -78,34 +78,36 @@ class GameController extends Controller
         $runGameLoop = $request->input('runGameLoop');
         $forceWebsocketGamestate = $request->input('forceWebsocketGamestate');
         if ($runGameLoop) {
-            if (!$gameId) {
+            if (! $gameId) {
                 // Just get the latest game,  the game with the highest ID
                 $gameId = Game::max('id');
             }
             GameLoop::dispatchSync($gameId);
+
             return response()->json(['message' => 'Game loop ran']);
         }
 
         if ($forceWebsocketGamestate) {
-            if (!$gameId) {
+            if (! $gameId) {
                 // Just get the latest game,  the game with the highest ID
                 $gameId = Game::max('id');
             }
 
             $game = Game::with(['players', 'messages'])->find($gameId);
             broadcast(new GameStateUpdate($game));
+
             return response()->json(['message' => 'Game loop ran']);
         }
 
         $game = Game::with(['players', 'messages'])->find($gameId);
-        if (!$game) {
+        if (! $game) {
             return response()->json(['error' => 'Game not found'], 400);
         }
 
         $players = $game->players;
         $player = $players->firstWhere('id', $playerId);
 
-        if (!$player) {
+        if (! $player) {
             return response()->json(['error' => 'Player not found'], 400);
         }
 
@@ -113,12 +115,12 @@ class GameController extends Controller
         $messages = [
             [
                 'role' => 'system',
-                'content' => "You are {$player->name}, playing as {$player->role} in Avalon. Give a quick greeting to the group."
-            ]
+                'content' => "You are {$player->name}, playing as {$player->role} in Avalon. Give a quick greeting to the group.",
+            ],
         ];
 
         // Get response from OpenAI
-        $openAI = new OpenAIService();
+        $openAI = new OpenAIService;
         $response = $openAI->getChatResponse($messages);
 
         if (empty($response['message'])) {
@@ -130,7 +132,7 @@ class GameController extends Controller
             'game_id' => $gameId,
             'player_id' => $playerId,
             'message_type' => 'public_chat',
-            'content' => $response['message']
+            'content' => $response['message'],
         ]);
 
         broadcast(new NewMessage($message));
@@ -138,7 +140,7 @@ class GameController extends Controller
         return response()->json([
             'success' => true,
             'message' => $message,
-            'aiResponse' => $response
+            'aiResponse' => $response,
         ]);
     }
 
@@ -147,7 +149,7 @@ class GameController extends Controller
         try {
             $game = Game::with([
                 'players',
-                'messages' => fn($q) => $q->orderBy('created_at', 'asc'),
+                'messages' => fn ($q) => $q->orderBy('created_at', 'asc'),
                 'currentMission.teamMembers.player',
                 'currentProposal.teamMembers.player',
                 'currentProposal.votes.player',
@@ -157,16 +159,16 @@ class GameController extends Controller
                             'teamMembers.player',
                             'proposals' => function ($q) {
                                 $q->latest()->with(['teamMembers.player', 'votes']);
-                            }
+                            },
                         ]);
-                }
+                },
             ])->findOrFail($gameId);
 
             return response()->json($game->renderFullGameState());
         } catch (Exception $e) {
             return response()->json([
                 'message' => 'Failed to fetch game state',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }

@@ -3,8 +3,8 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property Player $currentLeader
@@ -29,14 +29,14 @@ class Game extends Model
         'current_leader_id',
         'current_mission_id',
         'current_proposal_id',
-        'winner'
+        'winner',
     ];
 
     protected $casts = [
         'started_at' => 'datetime',
         'ended_at' => 'datetime',
         'has_human_player' => 'boolean',
-        'turn_count' => 'integer'
+        'turn_count' => 'integer',
     ];
 
     public function players(): HasMany
@@ -90,12 +90,12 @@ class Game extends Model
                 'required' => $mission->required_players,
                 'result' => $mission->status !== 'pending' ? [
                     'success' => $mission->status === 'success',
-                    'team' => $mission->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
+                    'team' => $mission->teamMembers->map(fn ($tm) => $tm->player->name)->values()->toArray(),
                     'votes' => [
                         'success' => $mission->success_votes,
-                        'fail' => $mission->fail_votes
-                    ]
-                ] : null
+                        'fail' => $mission->fail_votes,
+                    ],
+                ] : null,
             ];
         });
 
@@ -103,11 +103,11 @@ class Game extends Model
         $currentProposal = null;
         if ($game->currentProposal) {
             $currentProposal = [
-                'team' => $game->currentProposal->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
-                'playerIndexes' => $game->currentProposal->teamMembers->map(fn($tm) => $tm->player->player_index)->values()->toArray(),
+                'team' => $game->currentProposal->teamMembers->map(fn ($tm) => $tm->player->name)->values()->toArray(),
+                'playerIndexes' => $game->currentProposal->teamMembers->map(fn ($tm) => $tm->player->player_index)->values()->toArray(),
                 'votes' => $game->currentProposal->votes->mapWithKeys(function ($vote) {
                     return [$vote->player_id => $vote->approved];
-                })->toArray()
+                })->toArray(),
             ];
         }
 
@@ -117,19 +117,19 @@ class Game extends Model
             $currentMission = [
                 'id' => $game->currentMission->id,
                 'required' => $game->currentMission->required_players,
-                'playerIndexes' => $game->currentMission->teamMembers->map(fn($tm) => $tm->player->player_index)->values()->toArray(),
-                'team' => $game->currentMission->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
+                'playerIndexes' => $game->currentMission->teamMembers->map(fn ($tm) => $tm->player->player_index)->values()->toArray(),
+                'team' => $game->currentMission->teamMembers->map(fn ($tm) => $tm->player->name)->values()->toArray(),
                 'status' => $game->currentMission->status,
             ];
         }
 
         $proposals = $game->proposals->map(function ($proposal) {
             return [
-                'team' => $proposal->teamMembers->map(fn($tm) => $tm->player->name)->values()->toArray(),
-                'playerIndexes' => $proposal->teamMembers->map(fn($tm) => $tm->player->player_index)->values()->toArray(),
-                'votes' => $proposal->votes ? $proposal->votes->mapWithKeys(function($vote) {
+                'team' => $proposal->teamMembers->map(fn ($tm) => $tm->player->name)->values()->toArray(),
+                'playerIndexes' => $proposal->teamMembers->map(fn ($tm) => $tm->player->player_index)->values()->toArray(),
+                'votes' => $proposal->votes ? $proposal->votes->mapWithKeys(function ($vote) {
                     return [$vote->player->player_index => $vote->approved];
-                })->toArray() : []
+                })->toArray() : [],
             ];
         })->values()->toArray();
 
@@ -150,9 +150,9 @@ class Game extends Model
                 'target' => [
                     'name' => $name,
                     'id' => $targetId,
-                    'role' => $game->players()->firstWhere('id', $targetId)->role
+                    'role' => $game->players()->firstWhere('id', $targetId)->role,
                 ],
-                'wasSuccessful' => $targetId === $merlin->id
+                'wasSuccessful' => $targetId === $merlin->id,
             ];
         }
 
@@ -167,7 +167,7 @@ class Game extends Model
                     'currentProposal' => $currentProposal,
                     'assassination' => $assassination,
                     'missions' => $missions,
-                    'proposals' => $proposals
+                    'proposals' => $proposals,
                 ],
                 'has_human_player' => $game->has_human_player,
                 'winner' => $game->winner,
@@ -176,7 +176,7 @@ class Game extends Model
                 'started_at' => $game->started_at,
             ],
             'messages' => array_values($game->messages
-                ->reject(fn($message) => $message->message_type !== 'public_chat')
+                ->reject(fn ($message) => $message->message_type !== 'public_chat')
                 ->map(function ($message) {
                     return [
                         'id' => $message->id,
@@ -184,7 +184,7 @@ class Game extends Model
                         'player_id' => $message->player_id,
                         'player_name' => $message->player ? $message->player->name : 'System',
                         'created_at' => $message->created_at,
-                        'isSystem' => $message->player_id === null
+                        'isSystem' => $message->player_id === null,
                     ];
                 })->toArray()),
             'players' => $game->players->map(function ($player) use ($game) {
@@ -205,6 +205,7 @@ class Game extends Model
                 } elseif ($role === 'assassin') {
                     $roleLabel = 'Assassin';
                 }
+
                 return [
                     'id' => $player->id,
                     'name' => $player->name,
@@ -213,9 +214,7 @@ class Game extends Model
                     'roleLabel' => $roleLabel,
                     'is_human' => $player->is_human,
                 ];
-            })
+            }),
         ];
     }
 }
-
-

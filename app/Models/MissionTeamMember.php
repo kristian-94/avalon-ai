@@ -10,11 +10,11 @@ class MissionTeamMember extends Model
     protected $fillable = [
         'mission_id',
         'player_id',
-        'vote_success'
+        'vote_success',
     ];
 
     protected $casts = [
-        'vote_success' => 'boolean'
+        'vote_success' => 'boolean',
     ];
 
     public function mission(): BelongsTo

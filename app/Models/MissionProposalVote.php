@@ -10,11 +10,11 @@ class MissionProposalVote extends Model
     protected $fillable = [
         'proposal_id',
         'player_id',
-        'approved'
+        'approved',
     ];
 
     protected $casts = [
-        'approved' => 'boolean'
+        'approved' => 'boolean',
     ];
 
     public function proposal(): BelongsTo
@@ -27,4 +27,3 @@ class MissionProposalVote extends Model
         return $this->belongsTo(Player::class);
     }
 }
-

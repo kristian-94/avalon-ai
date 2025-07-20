@@ -4,13 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class MissionProposalMember extends Model
 {
     protected $fillable = [
         'proposal_id',
-        'player_id'
+        'player_id',
     ];
 
     public function proposal(): BelongsTo
@@ -23,4 +22,3 @@ class MissionProposalMember extends Model
         return $this->belongsTo(Player::class);
     }
 }
-

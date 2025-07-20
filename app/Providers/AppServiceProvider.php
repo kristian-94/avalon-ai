@@ -15,7 +15,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(Agent::class, function ($app) {
-            return env('OPEN_AI_API_KEY') ? new OpenAIService() : new BasicAgentService();
+            return env('OPEN_AI_API_KEY') ? new OpenAIService : new BasicAgentService;
         });
     }
 

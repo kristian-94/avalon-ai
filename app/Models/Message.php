@@ -10,14 +10,14 @@ class Message extends Model
     use HasFactory;
 
     protected $casts = [
-        'created_at' => 'datetime'
+        'created_at' => 'datetime',
     ];
 
     protected $fillable = [
         'game_id',
         'player_id',
         'message_type',
-        'content'
+        'content',
     ];
 
     public function game()

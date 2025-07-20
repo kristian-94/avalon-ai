@@ -16,22 +16,19 @@ class NewMessage implements ShouldBroadcast
 
     /**
      * The name of the queue connection to use when broadcasting the event.
-     *
-     * @var string
      */
     public string $connection = 'sync'; // We need messages to be fast.
 
-    public function __construct(public Message $message)
-    {
-    }
+    public function __construct(public Message $message) {}
 
     public function broadcastOn(): Channel
     {
         Log::info('Broadcasting message', [
             'driver' => config('broadcasting.default'),
-            'channel' => 'game.' . $this->message->game_id
+            'channel' => 'game.'.$this->message->game_id,
         ]);
-        return new Channel('game.' . $this->message->game_id);
+
+        return new Channel('game.'.$this->message->game_id);
     }
 
     public function broadcastWith(): array
@@ -42,7 +39,7 @@ class NewMessage implements ShouldBroadcast
             'player_id' => $this->message->player_id,
             'player_name' => $this->message->player?->name ?? 'System',
             'isSystem' => $this->message->player_id === null,
-            'created_at' => $this->message->created_at
+            'created_at' => $this->message->created_at,
         ];
     }
 }

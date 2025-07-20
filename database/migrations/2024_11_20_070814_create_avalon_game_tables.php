@@ -4,7 +4,8 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration {
+return new class extends Migration
+{
     public function up(): void
     {
         // Core game table
@@ -36,7 +37,7 @@ return new class extends Migration {
                 'merlin',
                 'assassin',
                 'loyal_servant',
-                'minion'
+                'minion',
             ]);
             $table->boolean('is_human')->default(false);
             $table->json('role_knowledge')->nullable();
@@ -61,7 +62,7 @@ return new class extends Migration {
             $table->enum('status', [
                 'pending',
                 'success',
-                'fail'
+                'fail',
             ])->default('pending');
             $table->integer('success_votes')->default(0);
             $table->integer('fail_votes')->default(0);
@@ -87,7 +88,7 @@ return new class extends Migration {
             $table->enum('status', [
                 'pending',
                 'approved',
-                'rejected'
+                'rejected',
             ])->default('pending');
             $table->timestamps();
 
@@ -156,7 +157,7 @@ return new class extends Migration {
                 'mission_vote',
                 'mission_complete',
                 'assassination',
-                'game_end'
+                'game_end',
             ]);
             $table->foreignId('player_id')->nullable()
                 ->constrained()

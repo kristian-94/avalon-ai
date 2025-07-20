@@ -13,7 +13,7 @@ class MissionProposal extends Model
         'mission_id',
         'proposed_by_id',
         'proposal_number',
-        'status'
+        'status',
     ];
 
     public function game(): BelongsTo
@@ -41,4 +41,3 @@ class MissionProposal extends Model
         return $this->hasMany(MissionProposalVote::class, 'proposal_id');
     }
 }
-

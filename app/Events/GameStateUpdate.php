@@ -14,6 +14,7 @@ class GameStateUpdate implements ShouldBroadcast
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public string $connection = 'sync';
+
     private Game $game;
 
     public function __construct(Game $game)
@@ -23,13 +24,13 @@ class GameStateUpdate implements ShouldBroadcast
             'currentProposal.teamMembers.player',
             'currentProposal.votes',
             'missions.teamMembers',
-            'missions.proposals'
+            'missions.proposals',
         ]);
     }
 
     public function broadcastOn(): Channel
     {
-        return new Channel('game.' . $this->game->id);
+        return new Channel('game.'.$this->game->id);
     }
 
     public function broadcastAs()

@@ -3,8 +3,8 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Mission extends Model
 {
@@ -14,7 +14,7 @@ class Mission extends Model
         'required_players',
         'status',
         'success_votes',
-        'fail_votes'
+        'fail_votes',
     ];
 
     public function game(): BelongsTo
@@ -32,4 +32,3 @@ class Mission extends Model
         return $this->hasMany(MissionTeamMember::class);
     }
 }
-

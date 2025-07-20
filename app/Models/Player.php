@@ -13,7 +13,7 @@ class Player extends Model
     protected $casts = [
         'is_human' => 'boolean',
         'role_knowledge' => 'array',
-        'player_index' => 'integer'
+        'player_index' => 'integer',
     ];
 
     protected $fillable = [
@@ -22,7 +22,7 @@ class Player extends Model
         'name',
         'role',
         'is_human',
-        'role_knowledge'
+        'role_knowledge',
     ];
 
     public function game()
