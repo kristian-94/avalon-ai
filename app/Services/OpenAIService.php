@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\Log;
 class OpenAIService implements AgentService
 {
     private string $apiKey;
+
     private string $model = 'gpt-3.5-turbo-1106';
+
     private string $baseUrl = 'https://api.openai.com/v1/chat/completions';
 
     public function __construct()
@@ -37,61 +39,63 @@ class OpenAIService implements AgentService
                             'properties' => [
                                 'message' => [
                                     'type' => 'string',
-                                    'description' => 'The message to be displayed in public chat'
+                                    'description' => 'The message to be displayed in public chat',
                                 ],
                                 'vote' => [
                                     'type' => 'boolean',
-                                    'description' => 'Optional vote decision'
+                                    'description' => 'Optional vote decision',
                                 ],
                                 'team_proposal' => [
                                     'type' => 'string',
-                                    'description' => 'Comma separated list of player names for the team proposal, no spaces. Example: "Max,Riley"'
+                                    'description' => 'Comma separated list of player names for the team proposal, no spaces. Example: "Max,Riley"',
                                 ],
                                 'assassination_target' => [
                                     'type' => 'string',
-                                    'description' => 'A single player name to assassinate, this is who you think Merlin is if you are the Assassin'
+                                    'description' => 'A single player name to assassinate, this is who you think Merlin is if you are the Assassin',
                                 ],
                                 'mission_action' => [
                                     'type' => 'boolean',
-                                    'description' => 'Optional mission action'
+                                    'description' => 'Optional mission action',
                                 ],
                                 'urgency' => [
                                     'type' => 'number',
-                                    'description' => 'Urgency of the action, 0-1. 1 is most urgent. You would use this to indicate that you want to speak first.'
+                                    'description' => 'Urgency of the action, 0-1. 1 is most urgent. You would use this to indicate that you want to speak first.',
                                 ],
                                 'reasoning' => [
                                     'type' => 'string',
-                                    'description' => 'Private reasoning for the action'
-                                ]
+                                    'description' => 'Private reasoning for the action',
+                                ],
                             ],
-                            'required' => ['message', 'reasoning']
-                        ]
+                            'required' => ['message', 'reasoning'],
+                        ],
                     ]],
                     'function_call' => ['name' => 'game_response'],
                     'temperature' => 0.7,
-                    'max_tokens' => 500
+                    'max_tokens' => 500,
                 ]);
 
             Log::info('OpenAI raw response', [
                 'status' => $response->status(),
-                'body' => $response->json()
+                'body' => $response->json(),
             ]);
 
-            if (!$response->successful()) {
+            if (! $response->successful()) {
                 Log::error('OpenAI API Error', [
                     'status' => $response->status(),
-                    'body' => $response->json()
+                    'body' => $response->json(),
                 ]);
+
                 return $this->getFallbackResponse();
             }
 
             $responseData = $response->json();
             $functionCall = $responseData['choices'][0]['message']['function_call'] ?? null;
 
-            if (!$functionCall || $functionCall['name'] !== 'game_response') {
+            if (! $functionCall || $functionCall['name'] !== 'game_response') {
                 Log::error('OpenAI API Invalid Response', [
-                    'functionCall' => $functionCall
+                    'functionCall' => $functionCall,
                 ]);
+
                 return $this->getFallbackResponse();
             }
 
@@ -100,8 +104,9 @@ class OpenAIService implements AgentService
             if (json_last_error() !== JSON_ERROR_NONE) {
                 Log::error('OpenAI API JSON Parse Error', [
                     'arguments' => $functionCall['arguments'],
-                    'error' => json_last_error_msg()
+                    'error' => json_last_error_msg(),
                 ]);
+
                 return $this->getFallbackResponse();
             }
 
@@ -110,8 +115,9 @@ class OpenAIService implements AgentService
         } catch (\Exception $e) {
             Log::error('OpenAI API Exception', [
                 'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
+
             return $this->getFallbackResponse();
         }
     }
@@ -122,7 +128,7 @@ class OpenAIService implements AgentService
             'message' => '', // Empty message to avoid spamming the chat
             'reasoning' => 'Encountered an issue processing my thoughts, taking a moment to reflect.',
             'vote' => null,
-            'mission_action' => null
+            'mission_action' => null,
         ];
     }
 }

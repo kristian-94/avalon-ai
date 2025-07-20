@@ -181,3 +181,10 @@ The application uses Laravel Echo with Reverb for WebSocket connections:
 
 ### Database Changes
 Always create migrations and update model relationships. The schema is complex with interdependent tables.
+
+## Development Principles
+
+### Testing and Quality Assurance
+- Always maintain test coverage
+- Obviously don't delete tests
+- Never skip tests, remove assertions, or take shortcuts
