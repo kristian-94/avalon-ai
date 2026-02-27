@@ -28,6 +28,15 @@ class GameLoop implements ShouldQueue
     private $minThinkingTime = 2; // Minimum seconds before AI responds
 
     private $maxThinkingTime = 5; // Maximum seconds before AI responds
+    
+    // Phase timeout settings (in seconds)
+    private $phaseTimeouts = [
+        'setup' => 300,         // 5 minutes for initial introductions
+        'team_proposal' => 180, // 3 minutes to propose a team
+        'team_voting' => 120,   // 2 minutes for everyone to vote
+        'mission' => 120,       // 2 minutes for mission execution
+        'assassination' => 180, // 3 minutes for assassination
+    ];
 
     public function __construct(public int $gameId) {}
 
@@ -39,8 +48,41 @@ class GameLoop implements ShouldQueue
             return;
         }
 
+        // Check for phase timeout FIRST
+        if ($this->hasPhaseTimedOut($game)) {
+            Log::warning("Game {$game->id} phase {$game->current_phase} has timed out");
+            $this->forcePhaseTransition($game);
+            $this->checkPhaseTransition($game->fresh());
+            
+            // Continue with next iteration
+            self::dispatch($this->gameId)->delay(now()->addSeconds(1));
+            return;
+        }
+
         // Determine which players should act based on the current phase
         $eligiblePlayers = $this->getEligiblePlayers($game);
+        
+        // For discussion phases, limit to one speaker at a time
+        if (in_array($game->current_phase, ['setup', 'team_proposal', 'mission']) && count($eligiblePlayers) > 1) {
+            // Get the last speaker
+            $lastMessage = $game->messages()
+                ->where('message_type', 'public_chat')
+                ->whereNotNull('player_id')
+                ->orderBy('id', 'desc')
+                ->first();
+                
+            if ($lastMessage) {
+                // Filter out the last speaker to ensure conversation flow
+                $eligiblePlayers = array_filter($eligiblePlayers, function($player) use ($lastMessage) {
+                    return $player->id !== $lastMessage->player_id;
+                });
+            }
+            
+            // Pick one random eligible player to speak next
+            if (count($eligiblePlayers) > 0) {
+                $eligiblePlayers = [array_values($eligiblePlayers)[array_rand(array_values($eligiblePlayers))]];
+            }
+        }
 
         // Process turns for eligible AI players
         foreach ($eligiblePlayers as $player) {
@@ -236,50 +278,180 @@ class GameLoop implements ShouldQueue
 
     public function prepareAIContext(Game $game, Player $player): array
     {
-        // Get all messages in chronological order
-        $messages = $game->messages()
-            ->whereIn('message_type', ['system_prompt', 'private_thought', 'public_chat', 'game_event'])
-            ->orderBy('id', 'asc')
+        $messages = [];
+        
+        // Always start with the system prompt
+        $systemPrompt = $game->messages()
+            ->where('message_type', 'system_prompt')
+            ->where('player_id', $player->id)
+            ->first();
+            
+        if ($systemPrompt) {
+            $messages[] = [
+                'role' => 'system',
+                'content' => $systemPrompt->content,
+            ];
+        }
+        
+        // Add current game state summary
+        $gameStateSummary = $this->generateGameStateSummary($game, $player);
+        $messages[] = [
+            'role' => 'system',
+            'content' => $gameStateSummary,
+        ];
+        
+        // Get recent conversation history (last 20 messages)
+        $recentMessages = $game->messages()
+            ->whereIn('message_type', ['public_chat', 'game_event'])
+            ->orderBy('id', 'desc')
+            ->limit(20)
             ->get()
+            ->reverse()
             ->map(function ($msg) use ($player) {
-                // system_prompt is the first message.
-                if ($msg->message_type === 'system_prompt' && $msg->player_id === $player->id) {
-                    return [
-                        'role' => 'system',
-                        'content' => $msg->content,
-                    ];
-                }
-
-                // Private thoughts for this player are from the assistant role
-                if ($msg->message_type === 'private_thought' && $msg->player_id === $player->id) {
-                    return [
-                        'role' => 'assistant',
-                        'content' => 'Private thought: '.$msg->content,
-                    ];
-                }
-                // Public chat: assistant for current player, user for others, and system for game events
                 if ($msg->message_type === 'public_chat') {
-                    $playerName = $msg->player?->name ?? 'Game event';
-
+                    $playerName = $msg->player?->name ?? 'System';
                     return [
                         'role' => $msg->player_id === $player->id ? 'assistant' : 'user',
                         'content' => "{$playerName}: {$msg->content}",
                     ];
                 }
-
+                
                 if ($msg->message_type === 'game_event' && $msg->player_id === $player->id) {
                     return [
                         'role' => 'system',
                         'content' => $msg->content,
                     ];
                 }
-
+                
                 return null;
             })
             ->filter()
-            ->toArray();
-
-        return array_values($messages);
+            ->values();
+            
+        foreach ($recentMessages as $msg) {
+            $messages[] = $msg;
+        }
+        
+        return $messages;
+    }
+    
+    private function generateGameStateSummary(Game $game, Player $player): string
+    {
+        $summary = "=== CURRENT GAME STATE ===\n";
+        $summary .= "Phase: {$game->current_phase}\n";
+        
+        // Mission status
+        $successfulMissions = $game->missions()->where('status', 'success')->count();
+        $failedMissions = $game->missions()->where('status', 'fail')->count();
+        $summary .= "Missions: {$successfulMissions} successful, {$failedMissions} failed\n";
+        
+        // Current mission details
+        if ($game->currentMission) {
+            $summary .= "Current Mission: #{$game->currentMission->mission_number} (requires {$game->currentMission->required_players} players)\n";
+            
+            // Proposal history for current mission
+            $proposals = $game->currentMission->proposals()->orderBy('proposal_number')->get();
+            if ($proposals->isNotEmpty()) {
+                $summary .= "Proposals this mission: {$proposals->count()}\n";
+                foreach ($proposals as $proposal) {
+                    if ($proposal->status !== 'pending') {
+                        $summary .= "  - Proposal #{$proposal->proposal_number} by {$proposal->proposedBy->name}: {$proposal->status}\n";
+                    }
+                }
+            }
+        }
+        
+        // Current leader
+        if ($game->current_leader_id) {
+            $isLeader = $game->current_leader_id === $player->id;
+            $leader = $game->players()->find($game->current_leader_id);
+            if ($leader) {
+                $summary .= "Current Leader: {$leader->name}" . ($isLeader ? " (YOU)" : "") . "\n";
+            }
+        }
+        
+        // Current proposal details if in voting phase
+        if ($game->current_phase === 'team_voting' && $game->currentProposal) {
+            $proposedTeam = $game->currentProposal->teamMembers->pluck('player.name')->join(', ');
+            $summary .= "Proposed Team: {$proposedTeam}\n";
+            
+            // Who has voted
+            $votedPlayers = $game->currentProposal->votes->pluck('player.name')->join(', ');
+            if ($votedPlayers) {
+                $summary .= "Already Voted: {$votedPlayers}\n";
+            }
+        }
+        
+        // Mission team if in mission phase
+        if ($game->current_phase === 'mission' && $game->currentMission) {
+            $missionTeam = $game->currentMission->teamMembers->pluck('player.name')->join(', ');
+            $summary .= "Mission Team: {$missionTeam}\n";
+            
+            $onMission = $game->currentMission->teamMembers->where('player_id', $player->id)->isNotEmpty();
+            if ($onMission) {
+                $summary .= "You are ON this mission team.\n";
+            }
+        }
+        
+        // Previous mission results
+        $completedMissions = $game->missions()->whereIn('status', ['success', 'fail'])->orderBy('mission_number')->get();
+        if ($completedMissions->isNotEmpty()) {
+            $summary .= "\nPrevious Missions:\n";
+            foreach ($completedMissions as $mission) {
+                $teamMembers = $mission->teamMembers->pluck('player.name')->join(', ');
+                $result = $mission->status === 'success' ? 'SUCCESS' : "FAILED ({$mission->fail_votes} fail votes)";
+                $summary .= "  Mission #{$mission->mission_number}: {$result} - Team: {$teamMembers}\n";
+            }
+        }
+        
+        $summary .= "=========================\n";
+        
+        // Add phase-specific action reminder
+        $summary .= "\nACTION REQUIRED: ";
+        switch ($game->current_phase) {
+            case 'setup':
+                $summary .= "Introduce yourself and share initial thoughts.\n";
+                break;
+            case 'team_proposal':
+                if ($game->current_leader_id === $player->id) {
+                    $summary .= "You are the leader. Propose a team of {$game->currentMission->required_players} players.\n";
+                } else {
+                    $leader = $game->players()->find($game->current_leader_id);
+                    $leaderName = $leader ? $leader->name : 'the leader';
+                    $summary .= "Wait for {$leaderName} to propose a team. You can discuss.\n";
+                }
+                break;
+            case 'team_voting':
+                $hasVoted = $game->currentProposal->votes->where('player_id', $player->id)->isNotEmpty();
+                if (!$hasVoted && $game->current_leader_id !== $player->id) {
+                    $summary .= "Vote on the proposed team (you MUST include a vote: true/false in your response).\n";
+                } else {
+                    $summary .= "Wait for others to vote. You can discuss.\n";
+                }
+                break;
+            case 'mission':
+                $onMission = $game->currentMission->teamMembers->where('player_id', $player->id)->isNotEmpty();
+                if ($onMission) {
+                    $hasActed = $game->currentMission->teamMembers->where('player_id', $player->id)->whereNotNull('vote_success')->isNotEmpty();
+                    if (!$hasActed) {
+                        $summary .= "You are on the mission. Include mission_action: true (success) or false (fail) in your response.\n";
+                    } else {
+                        $summary .= "You have completed your mission action. Wait for others.\n";
+                    }
+                } else {
+                    $summary .= "The mission team is executing their mission. Discuss and observe.\n";
+                }
+                break;
+            case 'assassination':
+                if ($player->role === 'assassin') {
+                    $summary .= "Choose who you think is Merlin (assassination_target: player_name).\n";
+                } else {
+                    $summary .= "The Assassin is choosing their target. You can try to mislead or stay quiet.\n";
+                }
+                break;
+        }
+        
+        return $summary;
     }
 
     public function checkPhaseTransition(Game $game): void
@@ -645,5 +817,170 @@ class GameLoop implements ShouldQueue
         return DB::table('jobs')
             ->whereRaw('json_extract(payload, "$.data.commandName") = ?', ['App\Jobs\GameLoop'])
             ->exists();
+    }
+    
+    private function hasPhaseTimedOut(Game $game): bool
+    {
+        if (!isset($this->phaseTimeouts[$game->current_phase])) {
+            return false;
+        }
+        
+        // For testing, check for a game_start event first
+        $lastTransition = GameEvent::where('game_id', $game->id)
+            ->whereIn('event_type', ['game_start', 'team_vote', 'mission_complete'])
+            ->orderBy('created_at', 'desc')
+            ->first();
+            
+        // Use the event time if available, otherwise use game started_at
+        $startTime = $lastTransition ? $lastTransition->created_at : $game->started_at;
+        $timeoutSeconds = $this->phaseTimeouts[$game->current_phase];
+        
+        // Calculate elapsed time
+        $elapsedSeconds = now()->diffInSeconds($startTime);
+        
+        return $elapsedSeconds > $timeoutSeconds;
+    }
+    
+    private function forcePhaseTransition(Game $game): void
+    {
+        Log::info("Forcing phase transition for game {$game->id} in phase {$game->current_phase}");
+        
+        switch ($game->current_phase) {
+            case 'setup':
+                // Force any players who haven't introduced themselves
+                $silentPlayers = $game->players()
+                    ->whereDoesntHave('messages', function ($query) {
+                        $query->where('message_type', 'public_chat');
+                    })
+                    ->get();
+                    
+                foreach ($silentPlayers as $player) {
+                    Message::create([
+                        'game_id' => $game->id,
+                        'player_id' => $player->id,
+                        'message_type' => 'public_chat',
+                        'content' => "Hi everyone! [Timed out]",
+                    ]);
+                }
+                break;
+                
+            case 'team_proposal':
+                // Force a random team proposal
+                if (!$game->current_proposal_id && $game->current_leader_id) {
+                    $requiredPlayers = $game->currentMission->required_players;
+                    $selectedPlayers = $game->players()
+                        ->inRandomOrder()
+                        ->take($requiredPlayers)
+                        ->get();
+                        
+                    $proposal = MissionProposal::create([
+                        'game_id' => $game->id,
+                        'mission_id' => $game->currentMission->id,
+                        'proposed_by_id' => $game->current_leader_id,
+                        'proposal_number' => $game->currentMission->proposals()->max('proposal_number') + 1 ?? 1,
+                        'status' => 'pending',
+                    ]);
+                    
+                    foreach ($selectedPlayers as $player) {
+                        MissionProposalMember::create([
+                            'proposal_id' => $proposal->id,
+                            'player_id' => $player->id,
+                        ]);
+                    }
+                    
+                    $game->current_proposal_id = $proposal->id;
+                    $game->save();
+                    
+                    Message::create([
+                        'game_id' => $game->id,
+                        'player_id' => $game->current_leader_id,
+                        'message_type' => 'public_chat',
+                        'content' => "Time's up! I'll propose: " . $selectedPlayers->pluck('name')->join(', '),
+                    ]);
+                }
+                break;
+                
+            case 'team_voting':
+                // Force remaining votes as rejections
+                if ($game->currentProposal) {
+                    $nonVoters = $game->players()
+                        ->where('id', '!=', $game->current_leader_id)
+                        ->whereDoesntHave('proposalVotes', function ($query) use ($game) {
+                            $query->where('proposal_id', $game->current_proposal_id);
+                        })
+                        ->get();
+                        
+                    foreach ($nonVoters as $player) {
+                        MissionProposalVote::create([
+                            'proposal_id' => $game->current_proposal_id,
+                            'player_id' => $player->id,
+                            'approved' => false, // Default to rejection
+                        ]);
+                        
+                        Message::create([
+                            'game_id' => $game->id,
+                            'player_id' => $player->id,
+                            'message_type' => 'public_chat',
+                            'content' => "I vote no. [Timed out]",
+                        ]);
+                    }
+                }
+                break;
+                
+            case 'mission':
+                // Force mission actions
+                if ($game->currentMission) {
+                    $pendingMembers = $game->currentMission->teamMembers()
+                        ->whereNull('vote_success')
+                        ->get();
+                        
+                    foreach ($pendingMembers as $member) {
+                        // Good players must succeed, evil players randomly choose
+                        $player = $member->player;
+                        $mustSucceed = in_array($player->role, ['loyal_servant', 'merlin']);
+                        $vote = $mustSucceed ? true : (bool)random_int(0, 1);
+                        
+                        $member->update(['vote_success' => $vote]);
+                    }
+                }
+                break;
+                
+            case 'assassination':
+                // Force random assassination
+                $assassin = $game->players()->where('role', 'assassin')->first();
+                if ($assassin) {
+                    $target = $game->players()
+                        ->whereNotIn('role', ['assassin', 'minion'])
+                        ->inRandomOrder()
+                        ->first();
+                        
+                    GameEvent::create([
+                        'game_id' => $game->id,
+                        'event_type' => 'assassination',
+                        'event_data' => [
+                            'assassin_target' => [
+                                'player_name' => $target->name,
+                                'player_id' => $target->id,
+                            ],
+                        ],
+                    ]);
+                    
+                    Message::create([
+                        'game_id' => $game->id,
+                        'player_id' => $assassin->id,
+                        'message_type' => 'public_chat',
+                        'content' => "Time's up! I'll guess... {$target->name} is Merlin!",
+                    ]);
+                }
+                break;
+        }
+        
+        // Log the forced transition as a game_event message
+        Message::create([
+            'game_id' => $game->id,
+            'player_id' => null,
+            'message_type' => 'game_event',
+            'content' => "Phase timeout: {$game->current_phase} phase timed out and was forced to progress.",
+        ]);
     }
 }

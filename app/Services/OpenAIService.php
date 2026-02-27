@@ -22,6 +22,10 @@ class OpenAIService implements AgentService
     public function getChatResponse(array $messages): array
     {
         $messages = array_values($messages);
+        
+        // Extract current phase from messages to customize function parameters
+        $currentPhase = $this->extractCurrentPhase($messages);
+        
         try {
             $response = Http::withToken($this->apiKey)
                 ->withHeaders([
@@ -34,40 +38,7 @@ class OpenAIService implements AgentService
                     'functions' => [[
                         'name' => 'game_response',
                         'description' => 'Respond to the current game situation',
-                        'parameters' => [
-                            'type' => 'object',
-                            'properties' => [
-                                'message' => [
-                                    'type' => 'string',
-                                    'description' => 'The message to be displayed in public chat',
-                                ],
-                                'vote' => [
-                                    'type' => 'boolean',
-                                    'description' => 'Optional vote decision',
-                                ],
-                                'team_proposal' => [
-                                    'type' => 'string',
-                                    'description' => 'Comma separated list of player names for the team proposal, no spaces. Example: "Max,Riley"',
-                                ],
-                                'assassination_target' => [
-                                    'type' => 'string',
-                                    'description' => 'A single player name to assassinate, this is who you think Merlin is if you are the Assassin',
-                                ],
-                                'mission_action' => [
-                                    'type' => 'boolean',
-                                    'description' => 'Optional mission action',
-                                ],
-                                'urgency' => [
-                                    'type' => 'number',
-                                    'description' => 'Urgency of the action, 0-1. 1 is most urgent. You would use this to indicate that you want to speak first.',
-                                ],
-                                'reasoning' => [
-                                    'type' => 'string',
-                                    'description' => 'Private reasoning for the action',
-                                ],
-                            ],
-                            'required' => ['message', 'reasoning'],
-                        ],
+                        'parameters' => $this->getPhaseSpecificParameters($currentPhase),
                     ]],
                     'function_call' => ['name' => 'game_response'],
                     'temperature' => 0.7,
@@ -129,6 +100,73 @@ class OpenAIService implements AgentService
             'reasoning' => 'Encountered an issue processing my thoughts, taking a moment to reflect.',
             'vote' => null,
             'mission_action' => null,
+        ];
+    }
+    
+    private function extractCurrentPhase(array $messages): string
+    {
+        // Look for phase information in recent system messages
+        foreach (array_reverse($messages) as $message) {
+            if ($message['role'] === 'system' && str_contains($message['content'], 'Phase:')) {
+                if (preg_match('/Phase:\s*(\w+)/', $message['content'], $matches)) {
+                    return $matches[1];
+                }
+            }
+        }
+        return 'unknown';
+    }
+    
+    private function getPhaseSpecificParameters(string $phase): array
+    {
+        $baseProperties = [
+            'message' => [
+                'type' => 'string',
+                'description' => 'The message to be displayed in public chat. Be concise and relevant to the current phase.',
+            ],
+            'reasoning' => [
+                'type' => 'string',
+                'description' => 'Private reasoning for your actions and thoughts',
+            ],
+        ];
+        
+        $required = ['message', 'reasoning'];
+        
+        // Add phase-specific properties
+        switch ($phase) {
+            case 'team_proposal':
+                $baseProperties['team_proposal'] = [
+                    'type' => 'string',
+                    'description' => 'ONLY if you are the leader: comma-separated list of player names for the team proposal. Example: "Max,Riley"',
+                ];
+                break;
+                
+            case 'team_voting':
+                $baseProperties['vote'] = [
+                    'type' => 'boolean',
+                    'description' => 'Your vote on the proposed team. true = approve, false = reject',
+                ];
+                $required[] = 'vote';
+                break;
+                
+            case 'mission':
+                $baseProperties['mission_action'] = [
+                    'type' => 'boolean',
+                    'description' => 'ONLY if you are on the mission team: true = success, false = fail (evil only)',
+                ];
+                break;
+                
+            case 'assassination':
+                $baseProperties['assassination_target'] = [
+                    'type' => 'string',
+                    'description' => 'ONLY if you are the Assassin: the name of the player you believe is Merlin',
+                ];
+                break;
+        }
+        
+        return [
+            'type' => 'object',
+            'properties' => $baseProperties,
+            'required' => $required,
         ];
     }
 }
