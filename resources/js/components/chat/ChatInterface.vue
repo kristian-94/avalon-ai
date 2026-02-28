@@ -1,6 +1,6 @@
 <template>
-  <div class="lg:col-span-1 bg-black/40 backdrop-blur-sm rounded-lg shadow">
-    <div class="h-[600px] flex flex-col">
+  <div class="bg-black/40 backdrop-blur-sm rounded-lg shadow flex-1 min-h-0">
+    <div class="h-full flex flex-col">
       <div class="p-4 border-b border-white/20">
         <h2 class="text-xl font-bold text-white">Game Chat</h2>
       </div>

@@ -48,7 +48,7 @@ class GameLoop implements ShouldQueue
     {
         $game = Game::with(['players', 'messages', 'gameEvents', 'currentMission', 'currentProposal'])->find($this->gameId);
 
-        if (! $game || $game->ended_at !== null || $game->current_phase === 'game_over') {
+        if (! $game || $game->ended_at !== null || in_array($game->current_phase, ['game_over', 'finished'])) {
             return;
         }
 
@@ -88,10 +88,15 @@ class GameLoop implements ShouldQueue
         // Check if we need to transition to a new phase
         $this->checkPhaseTransition($game);
 
+        // In debrief, stop re-dispatching once all AI players have spoken — nothing left to do.
+        if ($game->current_phase === 'debrief' && $aiTurnsProcessed === 0) {
+            return;
+        }
+
         // When waiting for human input (no AI work done), use a poll interval to avoid queue flooding.
         // Otherwise use the configured thinking time.
         $thinkingMs = random_int($this->minThinkingTime, $this->maxThinkingTime) * 1000;
-        $delayMs = ($aiTurnsProcessed === 0) ? max(200, $thinkingMs) : $thinkingMs;
+        $delayMs = ($aiTurnsProcessed === 0) ? max(500, $thinkingMs) : max(200, $thinkingMs);
 
         self::dispatch($this->gameId)->delay(now()->addMilliseconds($delayMs));
     }
@@ -105,7 +110,7 @@ class GameLoop implements ShouldQueue
         broadcast(new GameStateUpdate($game));
     }
 
-    public function endGame(Game $game, string $winner): void
+    public function endGame(Game $game, string $winner, string $reason = ''): void
     {
         $game->update([
             // Don't set ended_at yet — debrief phase first
@@ -116,7 +121,7 @@ class GameLoop implements ShouldQueue
         GameEvent::create([
             'game_id' => $game->id,
             'event_type' => 'game_end',
-            'event_data' => ['winner' => $winner],
+            'event_data' => ['winner' => $winner, 'reason' => $reason],
         ]);
 
         broadcast(new GameStateUpdate($game));
@@ -316,6 +321,9 @@ class GameLoop implements ShouldQueue
     public function processAIPlayerTurn(Game $game, Player $player): void
     {
         $messages = $this->prepareAIContext($game, $player);
+        $successCount = $game->missions()->where('status', 'success')->count();
+        $failCount    = $game->missions()->where('status', 'fail')->count();
+        Log::info("AI turn: {$player->name} ({$player->role}) | phase={$game->current_phase} | missions S{$successCount}/F{$failCount}");
         $response = Agent::getChatResponse($messages);
 
         // Track API usage
@@ -591,15 +599,18 @@ class GameLoop implements ShouldQueue
                 $evilOnProposal = array_values(array_intersect($evilNames, $proposedNames));
                 if (empty($evilOnProposal)) {
                     $summary .= "⛔ PROPOSED TEAM HAS NO EVIL PLAYERS (" . implode(', ', $proposedNames) . "). If this runs, you CANNOT sabotage it — it will succeed. You should REJECT this proposal (vote: false) unless rejecting would look too suspicious given the game state.\n";
+                    $goodPlayers = array_values(array_diff($proposedNames, $evilNames));
+                    $coverTarget = !empty($goodPlayers) ? $goodPlayers[0] : 'someone on the team';
+                    $summary .= "Cover language for your public message: Express doubt about a specific player (e.g. '$coverTarget'), say you'd want different people, or claim the team feels rushed — NOT that evil is missing. Never mention evil team composition in public chat.\n";
                 } else {
-                    $summary .= "✓ Evil player(s) on proposed team: " . implode(', ', $evilOnProposal) . ". Approving this enables sabotage.\n";
+                    $summary .= "✓ Evil player(s) on proposed team: " . implode(', ', $evilOnProposal) . ". Approving this enables sabotage. In public chat, sound enthusiastic or neutral about the team — do NOT give away that you're happy about evil being included.\n";
                 }
             }
 
             // In proposal phase: remind leader to include evil
             if ($game->current_phase === 'team_proposal' && $game->current_leader_id === $player->id) {
                 $partner = implode(' or ', $knownEvilNames);
-                $summary .= "👑 YOU ARE THE LEADER. Include yourself and/or {$partner} in your proposal so you can fail the mission.\n";
+                $summary .= "👑 YOU ARE THE LEADER. Include yourself and/or {$partner} in your proposal. In public chat, frame your proposal as a confident or well-reasoned choice — do NOT hint that you're including yourself or your partner for evil purposes.\n";
             }
 
             // In mission phase: tell them if evil is on mission and what to do
@@ -766,7 +777,7 @@ class GameLoop implements ShouldQueue
 
     private function shouldTransitionFromDebrief(Game $game): bool
     {
-        return false; // Debrief runs indefinitely — bots respond to each human message
+        return false; // Debrief runs indefinitely — players can keep chatting after the game
     }
 
     public function transitionToNextPhase(Game $game): void
@@ -812,17 +823,6 @@ class GameLoop implements ShouldQueue
                     $proposal = $game->currentProposal;
                     $proposal->status = 'rejected';
                     $proposal->save();
-
-                    // If there are 5 rejected proposals in a row, the game ends
-                    $rejectedProposals = $game->currentMission->proposals()->where('status', 'rejected')->count();
-                    if ($rejectedProposals >= 5) {
-                        $this->endGame($game, 'evil');
-
-                        return;
-                    }
-                    // Move to next leader for new proposal
-                    $game->current_phase = 'team_proposal';
-                    $game->current_leader_id = $this->getNextLeader($game);
                 }
 
                 $game->current_proposal_id = null;
@@ -843,6 +843,20 @@ class GameLoop implements ShouldQueue
                 ]);
 
                 broadcast(new GameStateUpdate($game));
+
+                if (!$voteApproved) {
+                    // If there are 5 rejected proposals in a row, the game ends
+                    $rejectedProposals = $game->currentMission->proposals()->where('status', 'rejected')->count();
+                    if ($rejectedProposals >= 5) {
+                        $this->endGame($game, 'evil', '5 proposals rejected');
+
+                        return;
+                    }
+                    // Move to next leader for new proposal
+                    $game->current_phase = 'team_proposal';
+                    $game->current_leader_id = $this->getNextLeader($game);
+                    $game->save();
+                }
             }
         } else {
             if ($previousPhase === 'debrief') {
@@ -860,9 +874,9 @@ class GameLoop implements ShouldQueue
                 $merlin = $game->players()->where('role', 'merlin')->first();
 
                 if ($assassin_target === $merlin->id) {
-                    $this->endGame($game, 'evil');
+                    $this->endGame($game, 'evil', 'Merlin was assassinated');
                 } else {
-                    $this->endGame($game, 'good');
+                    $this->endGame($game, 'good', 'Assassin missed Merlin');
                 }
 
                 return;
@@ -981,7 +995,7 @@ class GameLoop implements ShouldQueue
         broadcast(new NewMessage($publicmessage));
 
         if (isset($failedMissions) && $failedMissions >= 3) {
-            $this->endGame($game, 'evil');
+            $this->endGame($game, 'evil', '3 missions failed');
 
             return;
         }

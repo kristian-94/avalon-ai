@@ -1,5 +1,5 @@
 <template>
-  <div class="lg:col-span-1 rounded-lg p-4">
+  <div class="rounded-lg p-4">
     <MissionTracker
         :missions="gameState?.missions || []"
         :currentMissionId="gameState?.currentMission?.id || null"

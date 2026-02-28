@@ -1,10 +1,10 @@
 <template>
-  <div class="lg:col-span-1 bg-black/40 backdrop-blur-sm rounded-lg shadow">
-    <div class="h-[600px] flex flex-col">
-      <div class="p-4 border-b border-white/20">
-        <h2 class="text-xl font-bold text-white">Game History</h2>
+  <div class="bg-black/40 backdrop-blur-sm rounded-lg shadow">
+    <div class="h-[200px] flex flex-col">
+      <div class="px-4 py-2 border-b border-white/20">
+        <h2 class="text-sm font-bold text-white">Game History</h2>
       </div>
-      <div ref="eventsContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref="eventsContainer" class="flex-1 overflow-y-auto px-3 py-2 space-y-2">
         <div v-for="event in events" :key="event.id"
              :class="['rounded-lg px-3 py-2 text-sm relative', eventClass(event), hasBreakdown(event) ? 'group/evt cursor-default' : '']">
           {{ formatEvent(event) }}
@@ -104,8 +104,10 @@ const formatEvent = (event: GameEvent): string => {
       const role = data.assassin_target?.player_role || 'unknown role'
       return `Assassin targeted ${data.assassin_target?.player_name || 'unknown'} (${role})`
     }
-    case 'game_end':
-      return data.winner === 'good' ? 'Good wins' : 'Evil wins'
+    case 'game_end': {
+      const label = data.winner === 'good' ? 'Good wins' : 'Evil wins'
+      return data.reason ? `${label} — ${data.reason}` : label
+    }
     default:
       return `Event: ${event.event_type}`
   }

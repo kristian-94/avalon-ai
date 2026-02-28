@@ -2,6 +2,7 @@
   <div class="flex flex-col items-center justify-center min-h-[80vh]">
     <!-- Initial buttons -->
     <div v-if="!gameState && !pickingRole" class="text-center space-y-8">
+      <img src="/logo.png" alt="Avalon AI" class="w-40 h-40 mx-auto mb-4 drop-shadow-2xl" />
       <h1 class="text-4xl font-bold text-white mb-8">Avalon AI</h1>
       <div class="space-y-4">
         <p class="text-white/80 text-lg mb-8">

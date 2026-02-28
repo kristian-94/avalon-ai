@@ -42,7 +42,7 @@ class OpenAIService implements AgentService
                     ]],
                     'function_call' => ['name' => 'game_response'],
                     'temperature' => 0.7,
-                    'max_tokens' => 500,
+                    'max_tokens' => 300,
                 ]);
 
             Log::info('OpenAI raw response', [
@@ -123,7 +123,7 @@ class OpenAIService implements AgentService
         $baseProperties = [
             'message' => [
                 'type' => 'string',
-                'description' => 'Your in-character dialogue for the public chat. Express opinions, suspicions, emotions, and reasoning in your character\'s voice. IMPORTANT: Do NOT narrate your vote or game action (e.g. never say "I vote to approve" or "I propose Alex and Sam" — the game already shows that). Instead, say WHY you feel the way you do, what you observe, who you trust or distrust. Keep it natural and conversational, 1-2 sentences. If you have nothing NEW to add — no fresh observations, no new information, no response to something someone said to you — return an empty string "". Do NOT rehash or rephrase points you or others already made. Silence is fine.',
+                'description' => 'Your in-character dialogue for the public chat. Stay in your personality voice. Do NOT narrate your vote or game action (the game shows that automatically). Say WHY you feel the way you do. Keep it to 1 sentence, max 2. If you have nothing NEW to add, return empty string "". Silence is fine and often better than repeating yourself.',
             ],
             'reasoning' => [
                 'type' => 'string',

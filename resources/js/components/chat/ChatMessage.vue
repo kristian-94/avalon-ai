@@ -9,6 +9,11 @@
           : 'bg-gray-500/80 text-white self-start'
     ]">
       <p v-if="!message.isSystem" class="text-sm font-semibold flex items-center gap-1.5 flex-wrap">
+        <img
+          :src="getAvatarUrl(message.player_name)"
+          :alt="message.player_name"
+          class="w-5 h-5 rounded-full object-cover inline-block"
+        />
         {{ message.player_name }}
         <span v-if="playerRole" :class="[
           'text-xs font-normal px-1.5 py-0.5 rounded',
@@ -23,6 +28,12 @@
 </template>
 
 <script setup lang="ts">
+const aiNames = ['max', 'alex', 'sam', 'jordan', 'riley', 'taylor', 'morgan', 'jamie']
+const getAvatarUrl = (name: string) => {
+  const key = name.toLowerCase()
+  return aiNames.includes(key) ? `/avatars/${key}.png` : '/avatars/default.png'
+}
+
 defineProps<{
   message: {
     id: number

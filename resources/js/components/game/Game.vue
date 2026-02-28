@@ -7,17 +7,19 @@
     <div class="text-red-500 text-xl">{{ error }}</div>
   </div>
 
-  <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+  <div v-else class="grid grid-cols-1 lg:grid-cols-[1fr,400px] gap-4">
     <GameStateComponent :game-state="gameState" :players="players" :game="game"/>
-    <GameHistory :events="events" :rolesRevealed="gameState?.currentPhase === 'debrief' || gameState?.currentPhase === 'finished'"/>
-    <ChatInterface
-        :player-id="playerId"
-        :messages="messages"
-        :game-state="gameState"
-        :players="players"
-        :game-id="gameId"
-        @send-message="sendMessage"
-    />
+    <div class="flex flex-col gap-4 lg:h-[calc(100vh-3rem)]">
+      <GameHistory :events="events" :rolesRevealed="gameState?.currentPhase === 'debrief' || gameState?.currentPhase === 'finished'"/>
+      <ChatInterface
+          :player-id="playerId"
+          :messages="messages"
+          :game-state="gameState"
+          :players="players"
+          :game-id="gameId"
+          @send-message="sendMessage"
+      />
+    </div>
   </div>
 </template>
 

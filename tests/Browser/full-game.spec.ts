@@ -1,80 +1,50 @@
 import { test, expect, Page } from '@playwright/test'
 
 /**
- * Full game integration test — human plays through an entire Avalon game
- * using keyboard navigation.
+ * Full game integration test — human plays through an entire Avalon game.
  *
  * Requires:
  *   - `composer dev` running (server on :8000 + queue worker + vite)
- *   - AI_PROVIDER=random in .env
+ *   - AI_PROVIDER=openai (or random) in .env
  *
- * Keyboard flow:
- *   - Chat input is focused by default
- *   - ↓  from chat input → enters action panel
- *   - Voting:   ← = Reject highlighted, → = Approve highlighted, Enter = confirm
- *   - Proposal: ← → navigate player chips, Space = toggle, Enter = submit
- *   - Mission:  Enter = play success
- *   - Action panel auto-returns focus to chat after submission
+ * Stuck detection: if no new chat message arrives for 10s and no action panel
+ * is visible, the test fails immediately with a screenshot.
  */
 
-const BASE_URL     = 'http://localhost:8000'
-const GAME_TIMEOUT = 600_000  // 10 min ceiling (OpenAI API latency)
-const ACTION_WAIT  =  30_000  // how long to wait for an action panel to appear
+const BASE_URL    = 'http://localhost:8000'
+const GAME_TIMEOUT = 600_000  // 10 min hard ceiling
+const STUCK_MS    = 10_000    // bail if nothing happens for 10s
 
-// Returns which panel is now visible, or null
-async function visiblePanel(page: Page): Promise<'voting' | 'proposal' | 'mission' | null> {
-    // We detect panels by their unique hint text
-    const voting   = page.locator('text=← Approve · Reject →')
-    const proposal = page.locator('text=← → navigate')
-    const mission  = page.locator('text=You are on this mission')
+async function countMessages(page: Page): Promise<number> {
+    return page.locator('.rounded-lg.p-3').count()
+}
 
-    if (await voting.isVisible())   return 'voting'
-    if (await proposal.isVisible()) return 'proposal'
-    if (await mission.isVisible())  return 'mission'
+async function visiblePanel(page: Page): Promise<'voting' | 'proposal' | 'mission' | 'assassination' | null> {
+    if (await page.getByRole('button', { name: /Approve/i }).isVisible().catch(() => false))       return 'voting'
+    if (await page.getByRole('button', { name: /Propose Team/i }).isVisible().catch(() => false))  return 'proposal'
+    if (await page.getByRole('button', { name: /Play Success/i }).isVisible().catch(() => false))  return 'mission'
+    if (await page.locator('text=Choose who you think is Merlin').isVisible().catch(() => false))  return 'assassination'
     return null
 }
 
-async function waitForActionOrGameEnd(page: Page): Promise<'voting' | 'proposal' | 'mission' | 'finished' | 'timeout'> {
-    const deadline = Date.now() + ACTION_WAIT
-    while (Date.now() < deadline) {
-        // Check for game end first
-        if (await page.locator('text=/Good Triumphs|Evil Prevails/i').first().isVisible()) {
-            return 'finished'
-        }
-        const panel = await visiblePanel(page)
-        if (panel) return panel
-        await page.waitForTimeout(100)
-    }
-    return 'timeout'
-}
-
-test('human plays through a complete game without getting stuck', async ({ page }) => {
+async function playGame(page: Page, roleName: string) {
     page.setDefaultTimeout(600_000)
 
-    // ── 1. Navigate to home and start a game ────────────────────────────────
+    // ── 1. Start game ────────────────────────────────────────────────────────
     await page.goto(BASE_URL)
     await expect(page.getByRole('button', { name: /Play with AI/i })).toBeVisible()
     await page.getByRole('button', { name: /Play with AI/i }).click()
 
-    // Role picker appears — choose Random
     await expect(page.getByRole('heading', { name: /Choose Your Role/i })).toBeVisible({ timeout: 3_000 })
-    await page.getByRole('button', { name: /Random/i }).click()
+    // Match exact bold title to avoid description text matching wrong role
+    await page.locator('button').filter({ has: page.locator(`span.font-bold:text-is("${roleName}")`) }).click()
 
-    // Should redirect to /game/:id
     await expect(page).toHaveURL(/\/game\/\d+/, { timeout: 10_000 })
-    console.log('Game URL:', page.url())
+    console.log(`[${roleName}] Game URL:`, page.url())
 
-    // Game panels should render (check for chat panel heading)
     await expect(page.locator('h2:has-text("Game Chat")')).toBeVisible({ timeout: 5_000 })
-
-    // History panel should show game_start event
     await expect(page.locator('text=Game started')).toBeVisible({ timeout: 5_000 })
 
-    // Chat input should be focused by default
-    const chatInput = page.locator('input[type=text]')
-    await expect(chatInput).toBeVisible()
-
-    // Log API errors to help debug
     page.on('response', async response => {
         if (response.url().includes('/api/game/') && response.status() >= 400) {
             const body = await response.text().catch(() => '(unreadable)')
@@ -83,118 +53,114 @@ test('human plays through a complete game without getting stuck', async ({ page 
     })
 
     // ── 2. Play loop ─────────────────────────────────────────────────────────
-    const gameStart = Date.now()
-    let rounds       = 0
-    let votescast    = 0
-    let proposals    = 0
-    let missionCards = 0
+    const gameStart    = Date.now()
+    let rounds         = 0
+    let votescast      = 0
+    let proposals      = 0
+    let missionCards   = 0
+    let assassinations = 0
+    let lastMsgCount   = await countMessages(page)
+    let lastActivityAt = Date.now()
 
     while (Date.now() - gameStart < GAME_TIMEOUT) {
-        const result = await waitForActionOrGameEnd(page)
-
-        if (result === 'finished') {
-            console.log(`Game finished — rounds:${rounds} votes:${votescast} proposals:${proposals} missions:${missionCards}`)
-            // Log assassination details if present
-            const assassinationEntry = page.locator('text=/Assassin targeted/i').first()
-            if (await assassinationEntry.isVisible()) {
-                console.log(`Assassination: ${await assassinationEntry.textContent()}`)
-            }
+        // Game over?
+        if (await page.locator('text=/Good Triumphs|Evil Prevails/i').first().isVisible().catch(() => false)) {
+            console.log(`[${roleName}] Game finished — rounds:${rounds} votes:${votescast} proposals:${proposals} missions:${missionCards} assassinations:${assassinations}`)
             break
         }
 
-        if (result === 'timeout') {
-            // No action panel — AI is handling this phase. Try again.
+        const panel = await visiblePanel(page)
+
+        if (!panel) {
+            // No action needed — check if game is still alive via message activity
+            const msgCount = await countMessages(page)
+            if (msgCount !== lastMsgCount) {
+                lastMsgCount   = msgCount
+                lastActivityAt = Date.now()
+            }
+            const stuck = Date.now() - lastActivityAt
+            if (stuck > STUCK_MS) {
+                await page.screenshot({ path: `test-results/stuck-${roleName.toLowerCase().replace(/\s+/g, '-')}.png` })
+                throw new Error(`[${roleName}] No activity for ${stuck}ms — game appears stuck`)
+            }
             await page.waitForTimeout(200)
             continue
         }
 
+        // Reset activity timer whenever a panel appears
+        lastActivityAt = Date.now()
         rounds++
 
-        if (result === 'voting') {
-            // Bias 70% approve to keep games moving
+        if (panel === 'voting') {
             const approve = Math.random() > 0.3
-            const btn = approve
-                ? page.getByRole('button', { name: /Approve/i })
-                : page.getByRole('button', { name: /Reject/i })
-            await btn.click()
-
-            await expect(page.locator('text=/✓ Approved|✓ Rejected/')).toBeVisible({ timeout: 5_000 })
+            await page.getByRole('button', { name: approve ? /Approve/i : /Reject/i }).click()
+            await expect(page.locator('text=/✓ Approved|✓ Rejected/').first()).toBeVisible({ timeout: 5_000 })
             votescast++
-            console.log(`Round ${rounds}: voted ${approve ? 'approve' : 'reject'}`)
+            console.log(`[${roleName}] Round ${rounds}: voted ${approve ? 'approve' : 'reject'}`)
 
-        } else if (result === 'proposal') {
-            // Extract required count from "Select N players"
-            const counterText = await page.locator('text=/Select \\d+ players/').textContent() || ''
-            const match = counterText.match(/(\d+)/)
-            const required = match ? parseInt(match[1]) : 2
-
-            // Click the first N player chips
+        } else if (panel === 'proposal') {
+            const counterText = await page.locator('text=/Select \\d+ players/').textContent().catch(() => '') || ''
+            const required = parseInt(counterText.match(/(\d+)/)?.[1] ?? '2')
             const chips = page.locator('.rounded-full').filter({ hasText: /^[A-Z]/ })
             for (let i = 0; i < required; i++) {
                 await chips.nth(i).click()
                 await page.waitForTimeout(80)
             }
-
             await page.getByRole('button', { name: /Propose Team/ }).click()
-            await expect(page.locator('text=✓ Proposal submitted')).toBeVisible({ timeout: 5_000 })
+            await expect(page.locator('text=Proposal submitted')).toBeVisible({ timeout: 5_000 })
             proposals++
-            console.log(`Round ${rounds}: proposed team of ${required}`)
+            console.log(`[${roleName}] Round ${rounds}: proposed team of ${required}`)
 
-        } else if (result === 'mission') {
+        } else if (panel === 'mission') {
             await page.getByRole('button', { name: /Play Success/i }).click()
-
-            await expect(page.locator('text=✓ Mission card played')).toBeVisible({ timeout: 5_000 })
+            await expect(page.locator('text=Mission card played')).toBeVisible({ timeout: 5_000 })
             missionCards++
-            console.log(`Round ${rounds}: played mission card`)
+            console.log(`[${roleName}] Round ${rounds}: played mission card`)
+
+        } else if (panel === 'assassination') {
+            const targets = page.locator('text=Choose who you think is Merlin').locator('..').locator('button')
+            const targetName = await targets.first().textContent()
+            await targets.first().click()
+            await expect(page.locator('text=Assassination target chosen')).toBeVisible({ timeout: 5_000 })
+            assassinations++
+            console.log(`[${roleName}] Round ${rounds}: assassinated ${targetName?.trim()}`)
         }
 
-        // After each action the panel returns focus to chat automatically.
-        // Give WebSocket state update a moment to settle.
+        // Update message count after acting so the stuck timer doesn't fire immediately
+        lastMsgCount   = await countMessages(page)
+        lastActivityAt = Date.now()
         await page.waitForTimeout(250)
     }
 
     // ── 3. Assertions ────────────────────────────────────────────────────────
     const elapsed = ((Date.now() - gameStart) / 1000).toFixed(1)
-    console.log(`Total game time: ${elapsed}s`)
+    console.log(`[${roleName}] Total game time: ${elapsed}s`)
 
-    // Wait for debrief to finish (phase transitions to 'finished' after all bots have spoken)
-    await page.waitForFunction(() => !document.querySelector('[class*="animate-pulse"]')?.textContent?.includes('Debrief'), { timeout: 60_000 }).catch(() => {})
-
-    // Game must reach a winner — wait for VictoryScreen banner
     const victoryBanner = page.locator('text=/Good Triumphs!|Evil Prevails!/').first()
-    await expect(victoryBanner).toBeVisible({ timeout: 10_000 })
+    await expect(victoryBanner).toBeVisible({ timeout: 60_000 })
+    await page.waitForTimeout(3_000)  // brief debrief window
 
-    const bannerText = await victoryBanner.textContent()
-    console.log(`Winner: ${bannerText}`)
+    console.log(`[${roleName}] Winner: ${await victoryBanner.textContent()}`)
 
-    // Log API usage for cost estimation (gpt-4o-mini: $0.150/1M prompt, $0.600/1M completion)
+    // API cost summary
     const gameId = page.url().match(/\/game\/(\d+)/)?.[1]
     if (gameId) {
-        const stateResp = await page.request.get(`${BASE_URL}/api/game/${gameId}/state`)
-        const state = await stateResp.json()
+        const state = await page.request.get(`${BASE_URL}/api/game/${gameId}/state`).then(r => r.json()).catch(() => null)
         const usage = state?.apiUsage
         if (usage) {
-            const promptCost  = (usage.promptTokens     / 1_000_000) * 0.150
-            const completionCost = (usage.completionTokens / 1_000_000) * 0.600
-            const totalCost   = promptCost + completionCost
-            console.log(`API calls: ${usage.calls}`)
-            console.log(`Tokens — prompt: ${usage.promptTokens}, completion: ${usage.completionTokens}, total: ${usage.totalTokens}`)
-            console.log(`Est. cost: $${totalCost.toFixed(4)} (prompt $${promptCost.toFixed(4)} + completion $${completionCost.toFixed(4)})`)
+            const cost = (usage.promptTokens / 1_000_000) * 0.150 + (usage.completionTokens / 1_000_000) * 0.600
+            console.log(`[${roleName}] API calls: ${usage.calls} | tokens: ${usage.totalTokens} | est. cost: $${cost.toFixed(4)}`)
         }
     }
 
-    // VictoryScreen must show mission counts (proves real end state, not a false positive)
     await expect(page.getByText('Successful', { exact: true }).first()).toBeVisible()
     await expect(page.getByText('Failed', { exact: true }).first()).toBeVisible()
+    expect(votescast + proposals + missionCards + assassinations).toBeGreaterThan(0)
 
-    // Human must have taken at least one action (not a ghost game)
-    const totalActions = votescast + proposals + missionCards
-    expect(totalActions, 'Human should have taken at least one action').toBeGreaterThan(0)
+    await page.screenshot({ path: `test-results/game-end-${roleName.toLowerCase().replace(/\s+/g, '-')}.png` })
+    console.log(`[${roleName}] Screenshot saved`)
+}
 
-    // History panel must have captured events beyond game_start
-    await expect(page.locator('text=Game started')).toBeVisible()
-
-    // Take a final screenshot so we can see the end state
-    await page.screenshot({ path: 'test-results/game-end-state.png', fullPage: false })
-    console.log('End state screenshot saved to test-results/game-end-state.png')
-})
+test('human plays as Merlin',        async ({ page }) => playGame(page, 'Merlin'))
+test('human plays as Loyal Servant', async ({ page }) => playGame(page, 'Loyal Servant'))
+test('human plays as Assassin',      async ({ page }) => playGame(page, 'Assassin'))
