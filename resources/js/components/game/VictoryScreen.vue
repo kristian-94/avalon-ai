@@ -2,7 +2,7 @@
   <div class="space-y-6 text-center p-6 bg-black/40 backdrop-blur-sm rounded-lg">
     <!-- New Game Button -->
     <div>
-      <button @click="$emit('newGame')" class="px-6 py-2 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-lg border border-white/20 transition-all duration-200">
+      <button @click="router.push('/')" class="px-6 py-2 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-lg border border-white/20 transition-all duration-200">
         New Game
       </button>
     </div>
@@ -63,6 +63,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import type { Game, GameState, Player } from '../../types/game'
 
 const props = defineProps<{
@@ -71,7 +72,7 @@ const props = defineProps<{
   game: Game
 }>()
 
-defineEmits<{ newGame: [] }>()
+const router = useRouter()
 
 const completedMissions = computed(() =>
     props.gameState.missions.filter(m => m.status !== 'pending')

@@ -18,8 +18,8 @@ import { test, expect, Page } from '@playwright/test'
  */
 
 const BASE_URL     = 'http://localhost:8000'
-const GAME_TIMEOUT = 240_000  // 4 min ceiling (real OpenAI is slower than random AI)
-const ACTION_WAIT  =  15_000  // how long to wait for an action panel to appear
+const GAME_TIMEOUT = 600_000  // 10 min ceiling (OpenAI API latency)
+const ACTION_WAIT  =  30_000  // how long to wait for an action panel to appear
 
 // Returns which panel is now visible, or null
 async function visiblePanel(page: Page): Promise<'voting' | 'proposal' | 'mission' | null> {
@@ -49,15 +49,19 @@ async function waitForActionOrGameEnd(page: Page): Promise<'voting' | 'proposal'
 }
 
 test('human plays through a complete game without getting stuck', async ({ page }) => {
-    page.setDefaultTimeout(240_000)
+    page.setDefaultTimeout(600_000)
 
     // ── 1. Navigate to home and start a game ────────────────────────────────
     await page.goto(BASE_URL)
     await expect(page.getByRole('button', { name: /Play with AI/i })).toBeVisible()
     await page.getByRole('button', { name: /Play with AI/i }).click()
 
+    // Role picker appears — choose Random
+    await expect(page.getByRole('heading', { name: /Choose Your Role/i })).toBeVisible({ timeout: 3_000 })
+    await page.getByRole('button', { name: /Random/i }).click()
+
     // Should redirect to /game/:id
-    await expect(page).toHaveURL(/\/game\/\d+/, { timeout: 5_000 })
+    await expect(page).toHaveURL(/\/game\/\d+/, { timeout: 10_000 })
     console.log('Game URL:', page.url())
 
     // Game panels should render (check for chat panel heading)

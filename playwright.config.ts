@@ -4,7 +4,7 @@ export default defineConfig({
     testDir: './tests/Browser',
     globalSetup: './tests/Browser/global-setup.ts',
     globalTeardown: './tests/Browser/global-setup.ts',
-    timeout: 300_000,  // 5min per test (real OpenAI is slower than random AI)
+    timeout: 660_000,  // 11min per test (OpenAI API latency)
     expect: {
         timeout: 10_000,
     },

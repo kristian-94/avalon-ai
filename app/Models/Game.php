@@ -200,23 +200,35 @@ class Game extends Model
                 'completionTokens' => $game->completion_tokens,
             ],
             'players' => $game->players->map(function ($player) use ($game) {
-                $game->fresh();
+                $humanPlayer = $game->players->firstWhere('is_human', true);
+                $humanIsEvil = $humanPlayer && in_array($humanPlayer->role, ['assassin', 'minion']);
+                $humanIsMerlin = $humanPlayer && $humanPlayer->role === 'merlin';
+                $isGameEnd = in_array($game->current_phase, ['finished', 'debrief']);
+
                 // Always include role for the human player, or at game end for all players
-                $role = ($player->is_human || in_array($game->current_phase, ['finished', 'debrief'])) ? $player->role : null;
-                // Otherwise include the role for evil players during final assassination phase
-                if (!$role && $game->current_phase === 'assassination' && $player->role === 'assassin') {
-                    $role = 'assassin';
-                } elseif (!$role && $game->current_phase === 'assassination' && $player->role === 'minion') {
-                    $role = 'minion';
+                $role = ($player->is_human || $isGameEnd) ? $player->role : null;
+                // Evil players know their teammates — reveal evil roles to the human if they are evil
+                if (!$role && $humanIsEvil && in_array($player->role, ['assassin', 'minion'])) {
+                    $role = $player->role;
                 }
-                $roleLabel = $role ? ($role === 'loyal_servant' ? 'Loyal Servant' : ucfirst($role)) : null;
-                if ($role === 'merlin') {
-                    $roleLabel = 'Merlin';
-                } elseif ($role === 'minion') {
-                    $roleLabel = 'Minion of Mordred';
-                } elseif ($role === 'assassin') {
-                    $roleLabel = 'Assassin';
+                // Reveal evil roles during assassination phase
+                if (!$role && $game->current_phase === 'assassination' && in_array($player->role, ['assassin', 'minion'])) {
+                    $role = $player->role;
                 }
+
+                $roleLabel = match ($role) {
+                    'merlin' => 'Merlin',
+                    'loyal_servant' => 'Loyal Servant',
+                    'minion' => 'Minion of Mordred',
+                    'assassin' => 'Assassin',
+                    default => null,
+                };
+
+                // Merlin knows evil players during the game, but only sees "Evil" (not their specific role)
+                $knownEvil = !$player->is_human
+                    && !$isGameEnd
+                    && $humanIsMerlin
+                    && in_array($player->role, ['assassin', 'minion']);
 
                 return [
                     'id' => $player->id,
@@ -225,6 +237,7 @@ class Game extends Model
                     'role' => $role,
                     'roleLabel' => $roleLabel,
                     'is_human' => $player->is_human,
+                    'knownEvil' => $knownEvil,
                 ];
             }),
         ];

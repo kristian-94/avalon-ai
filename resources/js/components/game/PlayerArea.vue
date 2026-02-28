@@ -55,17 +55,17 @@
         <div class="text-white/50 text-xs">
           {{ player.is_human ? '🧑 Human' : '🤖 AI Agent' }}
         </div>
-        <!-- Role revealed at game end, or always for the human player -->
-        <div v-if="player.roleLabel && (isGameFinished || player.is_human)" :class="[
+        <!-- Merlin's view: evil players shown as "Evil" during game, role revealed at end -->
+        <div v-if="player.knownEvil" class="text-xs font-medium px-1.5 py-0.5 rounded bg-red-900/40 text-red-300">
+          Evil
+        </div>
+        <!-- Show role whenever the backend has provided it (own role, evil teammate, game end, assassination phase) -->
+        <div v-else-if="player.roleLabel" :class="[
           'text-xs font-medium px-1.5 py-0.5 rounded',
           player.role?.includes('minion') || player.role?.includes('assassin')
             ? 'bg-red-900/40 text-red-300'
             : 'bg-blue-900/40 text-blue-300'
         ]">
-          {{ player.roleLabel }}
-        </div>
-        <!-- During assassination phase, show evil players' roles -->
-        <div v-else-if="gameState?.currentPhase === 'assassination' && (player.role?.includes('minion') || player.role?.includes('assassin'))" class="text-xs font-medium px-1.5 py-0.5 rounded bg-red-900/40 text-red-300">
           {{ player.roleLabel }}
         </div>
       </div>

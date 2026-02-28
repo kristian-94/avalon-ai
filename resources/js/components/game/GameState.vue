@@ -7,7 +7,7 @@
 
     <!-- Game Progress -->
     <div v-if="gameState?.currentPhase === 'finished' || gameState?.currentPhase === 'debrief'" class="mb-4">
-      <VictoryScreen :game-state="gameState" :players="players" :game="game" :phase="gameState?.currentPhase" @new-game="$emit('newGame')"/>
+      <VictoryScreen :game-state="gameState" :players="players" :game="game" :phase="gameState?.currentPhase"/>
       <div v-if="gameState?.currentPhase === 'debrief'" class="mt-2 text-center text-white/50 text-sm animate-pulse">
         Debrief in progress…
       </div>
@@ -102,7 +102,6 @@ const props = defineProps<{
   game: Game
 }>()
 
-defineEmits<{ newGame: [] }>()
 
 const phases = [
   {id: 'team_proposal', label: 'Propose Team'},

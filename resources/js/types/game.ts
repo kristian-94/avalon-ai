@@ -8,6 +8,7 @@ export interface Player {
     name: string
     role?: string | null
     roleLabel?: string | null
+    knownEvil?: boolean
 }
 
 export interface MissionResult {

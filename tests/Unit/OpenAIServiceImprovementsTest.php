@@ -56,22 +56,28 @@ class OpenAIServiceImprovementsTest extends TestCase
         $this->assertEquals('unknown', $phase);
     }
 
-    public function test_get_phase_specific_parameters_for_team_proposal()
+    public function test_get_phase_specific_parameters_for_team_proposal_non_leader()
     {
         $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', ['team_proposal']);
-        
+
         $this->assertArrayHasKey('properties', $params);
         $this->assertArrayHasKey('message', $params['properties']);
         $this->assertArrayHasKey('reasoning', $params['properties']);
+
+        // Non-leader should NOT have team_proposal field — they can only chat
+        $this->assertArrayNotHasKey('team_proposal', $params['properties']);
+    }
+
+    public function test_get_phase_specific_parameters_for_team_proposal_leader()
+    {
+        $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', ['team_proposal_leader']);
+
+        $this->assertArrayHasKey('properties', $params);
         $this->assertArrayHasKey('team_proposal', $params['properties']);
-        
-        // Team proposal should not be required; message is also not required
-        $this->assertNotContains('message', $params['required']);
-        $this->assertContains('reasoning', $params['required']);
-        $this->assertNotContains('team_proposal', $params['required']);
-        
-        // Should have description about leader only
-        $this->assertStringContainsString('ONLY if you are the leader', $params['properties']['team_proposal']['description']);
+
+        // Leader MUST propose a team
+        $this->assertContains('team_proposal', $params['required']);
+        $this->assertStringContainsString('MUST propose', $params['properties']['team_proposal']['description']);
     }
 
     public function test_get_phase_specific_parameters_for_team_voting()
@@ -88,32 +94,48 @@ class OpenAIServiceImprovementsTest extends TestCase
         $this->assertArrayNotHasKey('team_proposal', $params['properties']);
     }
 
-    public function test_get_phase_specific_parameters_for_mission()
+    public function test_get_phase_specific_parameters_for_mission_observer()
     {
         $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', ['mission']);
-        
+
         $this->assertArrayHasKey('properties', $params);
-        $this->assertArrayHasKey('mission_action', $params['properties']);
-        
-        // Mission action should not be required (only team members act)
-        $this->assertNotContains('mission_action', $params['required']);
-        
-        // Should have description about team members only
-        $this->assertStringContainsString('ONLY if you are on the mission team', $params['properties']['mission_action']['description']);
+
+        // Observer should NOT have mission_action field — they can only chat
+        $this->assertArrayNotHasKey('mission_action', $params['properties']);
     }
 
-    public function test_get_phase_specific_parameters_for_assassination()
+    public function test_get_phase_specific_parameters_for_mission_on_team()
+    {
+        $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', ['mission_on_team']);
+
+        $this->assertArrayHasKey('properties', $params);
+        $this->assertArrayHasKey('mission_action', $params['properties']);
+
+        // Team member MUST submit mission action
+        $this->assertContains('mission_action', $params['required']);
+        $this->assertStringContainsString('MUST choose', $params['properties']['mission_action']['description']);
+    }
+
+    public function test_get_phase_specific_parameters_for_assassination_non_assassin()
     {
         $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', ['assassination']);
-        
+
+        $this->assertArrayHasKey('properties', $params);
+
+        // Non-assassin should NOT have assassination_target field
+        $this->assertArrayNotHasKey('assassination_target', $params['properties']);
+    }
+
+    public function test_get_phase_specific_parameters_for_assassination_assassin()
+    {
+        $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', ['assassination_assassin']);
+
         $this->assertArrayHasKey('properties', $params);
         $this->assertArrayHasKey('assassination_target', $params['properties']);
-        
-        // Assassination target should not be required (only assassin acts)
-        $this->assertNotContains('assassination_target', $params['required']);
-        
-        // Should have description about assassin only
-        $this->assertStringContainsString('ONLY if you are the Assassin', $params['properties']['assassination_target']['description']);
+
+        // Assassin MUST choose a target
+        $this->assertContains('assassination_target', $params['required']);
+        $this->assertStringContainsString('MUST choose', $params['properties']['assassination_target']['description']);
     }
 
     public function test_get_phase_specific_parameters_for_unknown_phase()
@@ -188,18 +210,20 @@ class OpenAIServiceImprovementsTest extends TestCase
     public function test_phase_specific_descriptions_are_helpful()
     {
         // Test that descriptions provide clear guidance for each phase
-        $phases = ['team_proposal', 'team_voting', 'mission', 'assassination'];
-        
+        $phases = ['team_proposal', 'team_proposal_leader', 'team_voting', 'mission', 'mission_on_team', 'assassination', 'assassination_assassin'];
+
         foreach ($phases as $phase) {
             $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', [$phase]);
-            
+
             // Message should always provide in-character dialogue guidance
             $this->assertStringContainsString('in-character',
-                $params['properties']['message']['description']);
+                $params['properties']['message']['description'],
+                "Phase {$phase} missing in-character guidance in message description");
 
             // Reasoning should be about private thoughts
             $this->assertStringContainsString('Private',
-                $params['properties']['reasoning']['description']);
+                $params['properties']['reasoning']['description'],
+                "Phase {$phase} missing private reasoning description");
         }
     }
 }

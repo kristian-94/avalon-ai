@@ -8,7 +8,7 @@
   </div>
 
   <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <GameStateComponent :game-state="gameState" :players="players" :game="game" @new-game="startNewGame"/>
+    <GameStateComponent :game-state="gameState" :players="players" :game="game"/>
     <GameHistory :events="events" :rolesRevealed="gameState?.currentPhase === 'debrief' || gameState?.currentPhase === 'finished'"/>
     <ChatInterface
         :player-id="playerId"
@@ -142,20 +142,6 @@ const initializeWebSocket = () => {
 
 const addMessage = (message: Message) => {
   messages.value.push(message)
-}
-
-const startNewGame = async () => {
-  const mode = game.value?.has_human_player ? 'play' : 'watch'
-  const response = await axios.post('/api/game/initialize', { mode })
-  const { gameId: newGameId, playerId: newPlayerId } = response.data
-  localStorage.setItem('playerId', newPlayerId)
-  localStorage.setItem('gameId', newGameId)
-  if (pollInterval) { clearInterval(pollInterval); pollInterval = null }
-  window.Echo.leave(`game.${gameId.value}`)
-  gameId.value = newGameId
-  playerId.value = newPlayerId
-  await initializeGame()
-  await router.push(`/game/${newGameId}`)
 }
 
 const sendMessage = async (messageText: string) => {

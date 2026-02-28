@@ -123,7 +123,7 @@ class OpenAIService implements AgentService
         $baseProperties = [
             'message' => [
                 'type' => 'string',
-                'description' => 'Your in-character dialogue for the public chat. Express opinions, suspicions, emotions, and reasoning in your character\'s voice. IMPORTANT: Do NOT narrate your vote or game action (e.g. never say "I vote to approve" or "I propose Alex and Sam" — the game already shows that). Instead, say WHY you feel the way you do, what you observe, who you trust or distrust. Keep it natural and conversational, 1-2 sentences.',
+                'description' => 'Your in-character dialogue for the public chat. Express opinions, suspicions, emotions, and reasoning in your character\'s voice. IMPORTANT: Do NOT narrate your vote or game action (e.g. never say "I vote to approve" or "I propose Alex and Sam" — the game already shows that). Instead, say WHY you feel the way you do, what you observe, who you trust or distrust. Keep it natural and conversational, 1-2 sentences. If you have nothing NEW to add — no fresh observations, no new information, no response to something someone said to you — return an empty string "". Do NOT rehash or rephrase points you or others already made. Silence is fine.',
             ],
             'reasoning' => [
                 'type' => 'string',
@@ -134,14 +134,20 @@ class OpenAIService implements AgentService
         $required = ['reasoning'];
         
         // Add phase-specific properties
+        // Phases ending in _must_act indicate the player MUST provide the action field.
         switch ($phase) {
-            case 'team_proposal':
+            case 'team_proposal_leader':
                 $baseProperties['team_proposal'] = [
                     'type' => 'string',
-                    'description' => 'ONLY if you are the leader: comma-separated list of player names for the team proposal. Example: "Max,Riley"',
+                    'description' => 'Comma-separated list of player names for the team proposal. Example: "Max,Riley". You MUST propose a team now.',
                 ];
+                $required[] = 'team_proposal';
                 break;
-                
+
+            case 'team_proposal':
+                // Non-leader during proposal phase — can only chat
+                break;
+
             case 'team_voting':
                 $baseProperties['vote'] = [
                     'type' => 'boolean',
@@ -149,19 +155,33 @@ class OpenAIService implements AgentService
                 ];
                 $required[] = 'vote';
                 break;
-                
-            case 'mission':
+
+            case 'team_voting_voted':
+                // Player has already voted — they can chat but don't need to vote again
+                break;
+
+            case 'mission_on_team':
                 $baseProperties['mission_action'] = [
                     'type' => 'boolean',
-                    'description' => 'ONLY if you are on the mission team: true = success, false = fail (evil only)',
+                    'description' => 'Your mission action. true = success, false = fail (evil only). You MUST choose now.',
                 ];
+                $required[] = 'mission_action';
                 break;
-                
-            case 'assassination':
+
+            case 'mission':
+                // Observer — not on mission team, can only chat
+                break;
+
+            case 'assassination_assassin':
                 $baseProperties['assassination_target'] = [
                     'type' => 'string',
-                    'description' => 'ONLY if you are the Assassin: the name of the player you believe is Merlin',
+                    'description' => 'The name of the player you believe is Merlin. You MUST choose a target now.',
                 ];
+                $required[] = 'assassination_target';
+                break;
+
+            case 'assassination':
+                // Non-assassin during assassination — can only chat
                 break;
         }
         

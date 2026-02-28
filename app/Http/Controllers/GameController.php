@@ -24,13 +24,15 @@ class GameController extends Controller
     {
         $validated = $request->validate([
             'mode' => 'required|string|in:play,watch',
+            'role' => 'nullable|string|in:merlin,assassin,loyal_servant,minion',
         ]);
 
         $mode = $validated['mode'];
         $humanPlayers = $mode === 'play' ? 1 : 0;
+        $preferredRole = $validated['role'] ?? null;
 
         try {
-            $game = GameSetupService::initializeGame($humanPlayers);
+            $game = GameSetupService::initializeGame($humanPlayers, $preferredRole);
         } catch (Exception $e) {
             return response()->json([
                 'message' => 'Failed to initialize game',

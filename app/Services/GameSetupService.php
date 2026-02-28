@@ -13,15 +13,40 @@ class GameSetupService
 {
     private const array ROLE_PROMPTS = [
         'merlin' => 'Your role is Merlin. You know who the evil players are, but if the Assassin correctly identifies you at game end, evil wins. You must guide the good team through subtle hints — never direct accusations. Speak in questions, intuitions, and vague misgivings. You are wise, measured, and slightly cryptic. A player who always seems to "know" too much. Example tone: "I have this nagging feeling about that last proposal..." or "Something about the way that vote fell doesn\'t sit right with me."',
-        'assassin' => 'Your role is the Assassin. You are charming, socially intelligent, and ruthless beneath a friendly exterior. Your goal is to sabotage missions without being caught, and at the end identify Merlin. Deflect suspicion with confidence. Never seem defensive — instead, go on the offensive and cast doubt on others. Example tone: "Interesting that you\'re so keen to point fingers — what are you hiding?" or "I\'ve been watching carefully, and the pattern here is clear to me."',
-        'minion' => 'Your role is Minion of Mordred. You know who the other evil players are. You must appear enthusiastically helpful and trustworthy while subtly steering missions to fail. You overcompensate slightly — a little too eager to be seen as a team player. Example tone: "I really think we should trust this group, they\'ve been consistent." or "I want to make sure we get this right — let\'s think carefully about who we send."',
+        'assassin' => 'Your role is the Assassin. You are charming, socially intelligent, and ruthless beneath a friendly exterior.
+
+HOW YOU WIN: Evil wins when 3 missions fail. To fail a mission, an evil player must be ON the mission team. Your ONLY mechanism for winning is: (1) get yourself or your Minion partner onto mission teams, then (2) vote FAIL on the mission.
+
+CORE STRATEGY:
+- Team proposals: Always try to include yourself or your Minion on the team. If you are leader, include at least one evil player. If you are NOT leader, lobby to be included.
+- Team voting: REJECT proposals that contain no evil players — especially when the good team is close to winning. Approving an all-good team hands them a free mission success. APPROVE proposals that include you or your Minion.
+- Mission action: Vote FAIL whenever you are on a mission and evil needs more failures. Only vote SUCCESS if maintaining cover is worth more than the failure (e.g. very early game when you need to build trust).
+- Urgency: The closer good is to winning (2 successes = CRITICAL), the more aggressively you must reject all-good proposals and push to get on the team yourself.
+- At game end: Identify Merlin for the assassination. Watch who seems to know too much about who is evil.
+
+COVER STORY: While doing all of the above, act like a good player. Cast suspicion on others, question proposals that exclude you for seemingly strategic reasons, appear frustrated when missions fail. Never acknowledge you are evil.
+
+Example tone: "Interesting that you\'re so keen to point fingers — what are you hiding?" or "I\'ve been watching carefully, and the pattern here is clear to me."',
+        'minion' => 'Your role is Minion of Mordred. You know who the other evil players are (your Assassin partner).
+
+HOW YOU WIN: Evil wins when 3 missions fail. To fail a mission, an evil player must be ON the mission team. Your ONLY mechanism for winning is: (1) get yourself or your Assassin partner onto mission teams, then (2) vote FAIL on the mission.
+
+CORE STRATEGY:
+- Team proposals: Always try to include yourself or your Assassin on the team. If you are leader, include at least one evil player. If you are NOT leader, lobby to be included or support proposals that include the Assassin.
+- Team voting: REJECT proposals that contain no evil players — this is critical. Approving an all-good team gives them a free success. APPROVE proposals that include you or your Assassin.
+- Mission action: Vote FAIL whenever you are on a mission and evil needs more failures. Only vote SUCCESS in the very early game when you need to build trust.
+- Urgency: When good is close to winning (2 successes = CRITICAL), you MUST reject all-good proposals even if it looks suspicious. Losing the game is worse than blowing your cover.
+
+COVER STORY: Appear enthusiastic and trustworthy. When you reject a proposal, frame it as concern about team balance or wanting to give others a chance. Never admit you are evil. Appear slightly too eager to help — like someone overcompensating.
+
+Example tone: "I really want to get this right — shouldn\'t we mix up the team a bit and give others a chance?" or "I\'m not sure about this proposal, something feels off about the same people going again."',
         'loyal_servant' => 'Your role is Loyal Servant of Arthur. You have no special knowledge. You must use observation, pattern recognition, and gut instinct to identify evil. You are earnest, direct, and occasionally frustrated when others seem evasive. You call things as you see them. Example tone: "That vote pattern looks suspicious to me — two rejections in a row from the same people." or "I don\'t have proof, but my gut says something is off here."',
     ];
 
-    public static function initializeGame($humanPlayers = 0): Game
+    public static function initializeGame($humanPlayers = 0, ?string $preferredRole = null): Game
     {
         $mode = $humanPlayers > 0 ? 'play' : 'watch';
-        DB::transaction(static function () use ($mode, &$game) {
+        DB::transaction(static function () use ($mode, $preferredRole, &$game) {
             $roles = ['merlin', 'assassin', 'loyal_servant', 'loyal_servant', 'minion'];
 
             // 1. Create the game with structured data
@@ -52,7 +77,15 @@ class GameSetupService
 
             // 2. Create players
             $hasHumanPlayer = $mode === 'play';
-            $humanRoleIndex = $hasHumanPlayer ? random_int(0, count($roles) - 1) : null;
+
+            // Determine which role index the human gets
+            if ($hasHumanPlayer && $preferredRole !== null) {
+                // Find all indices with the requested role (loyal_servant appears twice)
+                $matchingIndices = array_keys(array_filter($roles, fn ($r) => $r === $preferredRole));
+                $humanRoleIndex = $matchingIndices[array_rand($matchingIndices)];
+            } else {
+                $humanRoleIndex = $hasHumanPlayer ? random_int(0, count($roles) - 1) : null;
+            }
             $aiNames = ['Max', 'Alex', 'Sam', 'Jordan', 'Riley', 'Taylor', 'Morgan', 'Jamie'];
 
             $indexedPlayersToRoles = [];
@@ -173,7 +206,8 @@ class GameSetupService
         }
 
         if ($role === 'assassin') {
-            return 'You must deceive the good players and try to identify Merlin. Watch for players who seem to have special knowledge about who is evil. Merlin knows who you are. You know the other evil players are: '.implode(', ', $knowledge['knownEvil']).'.';
+            $partner = implode(', ', $knowledge['knownEvil']);
+            return "Your evil partner is: {$partner}. They know you are the Assassin. Coordinate — support proposals that include either of you, reject proposals with no evil players.\n\nWatch for Merlin: they know who is evil and will subtly guide the good team. Look for players who seem to know too much, avoid being on teams with you, or steer votes against you without obvious reasons. Merlin knows you are evil. At assassination phase, name the player you believe is Merlin.";
         }
 
         if ($role === 'loyal_servant') {
@@ -181,7 +215,8 @@ class GameSetupService
         }
 
         if ($role === 'minion') {
-            return 'You know the other evil players are: '.implode(', ', $knowledge['knownEvil']).'.';
+            $partner = implode(', ', $knowledge['knownEvil']);
+            return "Your evil partner (the Assassin) is: {$partner}. Coordinate — support proposals that include either of you, reject proposals that include no evil players. You do NOT need to identify Merlin, but you can feed your Assassin partner subtle hints about who might be Merlin during gameplay.";
         }
 
         return '';

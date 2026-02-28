@@ -48,7 +48,13 @@ class GameLoop implements ShouldQueue
     {
         $game = Game::with(['players', 'messages', 'gameEvents', 'currentMission', 'currentProposal'])->find($this->gameId);
 
-        if (! $game || $game->ended_at !== null) {
+        if (! $game || $game->ended_at !== null || $game->current_phase === 'game_over') {
+            return;
+        }
+
+        // Discard stale jobs for games that haven't had any activity in over 2 hours
+        if ($game->updated_at && $game->updated_at->lt(now()->subHours(2))) {
+            Log::info("Game {$game->id} is stale (last activity: {$game->updated_at}), discarding job.");
             return;
         }
 
@@ -176,13 +182,36 @@ class GameLoop implements ShouldQueue
                 ->get()
                 ->all(),
 
-            'team_voting' => $game->players()
-                ->where('id', '!=', $game->current_leader_id)
-                ->whereDoesntHave('proposalVotes', function ($query) use ($game) {
-                    $query->where('proposal_id', $game->current_proposal_id);
-                })
-                ->get()
-                ->all(),
+            'team_voting' => (function () use ($game) {
+                // Players who haven't voted yet always get a turn (to vote + chat).
+                // Players who have already voted can still chat, but only if there's
+                // been a new message since they last spoke (prevents spam).
+                $lastMessage = $game->messages()
+                    ->where('message_type', 'public_chat')
+                    ->latest()
+                    ->first();
+                $lastMessageTime = $lastMessage?->created_at ?? now();
+
+                $unvoted = $game->players()
+                    ->where('id', '!=', $game->current_leader_id)
+                    ->whereDoesntHave('proposalVotes', function ($query) use ($game) {
+                        $query->where('proposal_id', $game->current_proposal_id);
+                    })
+                    ->get();
+
+                $voted = $game->players()
+                    ->where('id', '!=', $game->current_leader_id)
+                    ->whereHas('proposalVotes', function ($query) use ($game) {
+                        $query->where('proposal_id', $game->current_proposal_id);
+                    })
+                    ->whereDoesntHave('messages', function ($q) use ($lastMessageTime) {
+                        $q->where('message_type', 'public_chat')
+                            ->where('created_at', '>=', $lastMessageTime);
+                    })
+                    ->get();
+
+                return $unvoted->merge($voted)->all();
+            })(),
 
             'mission' => $game->currentMission
                 ->teamMembers()
@@ -451,7 +480,26 @@ class GameLoop implements ShouldQueue
     private function generateGameStateSummary(Game $game, Player $player): string
     {
         $summary = "=== CURRENT GAME STATE ===\n";
-        $summary .= "Phase: {$game->current_phase}\n";
+        // Use player-specific phase markers so the AI schema can require actions
+        // from the right players (leader must propose, team members must act, etc.)
+        $effectivePhase = $game->current_phase;
+        if ($game->current_phase === 'team_voting' && $game->currentProposal) {
+            $hasVoted = $game->currentProposal->votes->where('player_id', $player->id)->isNotEmpty();
+            if ($hasVoted || $game->current_leader_id === $player->id) {
+                $effectivePhase = 'team_voting_voted';
+            }
+        } elseif ($game->current_phase === 'team_proposal' && $game->current_leader_id === $player->id) {
+            $effectivePhase = 'team_proposal_leader';
+        } elseif ($game->current_phase === 'mission' && $game->currentMission) {
+            $onMission = $game->currentMission->teamMembers->where('player_id', $player->id)->isNotEmpty();
+            $hasActed = $onMission && $game->currentMission->teamMembers->where('player_id', $player->id)->whereNotNull('vote_success')->isNotEmpty();
+            if ($onMission && !$hasActed) {
+                $effectivePhase = 'mission_on_team';
+            }
+        } elseif ($game->current_phase === 'assassination' && $player->role === 'assassin') {
+            $effectivePhase = 'assassination_assassin';
+        }
+        $summary .= "Phase: {$effectivePhase}\n";
         
         // Mission status
         $successfulMissions = $game->missions()->where('status', 'success')->count();
@@ -516,7 +564,56 @@ class GameLoop implements ShouldQueue
                 $summary .= "  Mission #{$mission->mission_number}: {$result} - Team: {$teamMembers}\n";
             }
         }
-        
+
+        // Win condition summary (visible to all, helps everyone reason about urgency)
+        $goodNeeds = max(0, 3 - $successfulMissions);
+        $evilNeeds = max(0, 3 - $failedMissions);
+        $summary .= "\nWin conditions: Good needs {$goodNeeds} more success(es). Evil needs {$evilNeeds} more failure(s).\n";
+
+        // Evil-player-only intel block
+        $isEvil = in_array($player->role, ['assassin', 'minion']);
+        if ($isEvil) {
+            $knownEvilNames = array_keys($player->role_knowledge['knownRoles'] ?? []);
+            $evilNames = array_merge([$player->name], $knownEvilNames); // self + partner(s)
+
+            $summary .= "\n=== YOUR EVIL TEAM INTEL ===\n";
+            $summary .= "Evil players (you + partner): " . implode(', ', $evilNames) . "\n";
+
+            if ($goodNeeds === 1) {
+                $summary .= "⚠️ CRITICAL: Good team needs just 1 more success to win. You MUST prevent it.\n";
+            } elseif ($goodNeeds === 2) {
+                $summary .= "⚠️ URGENT: Good team needs 2 more successes. Increase pressure now.\n";
+            }
+
+            // In voting phase: tell them whether evil is on the proposed team
+            if (in_array($game->current_phase, ['team_voting']) && $game->currentProposal) {
+                $proposedNames = $game->currentProposal->teamMembers->pluck('player.name')->toArray();
+                $evilOnProposal = array_values(array_intersect($evilNames, $proposedNames));
+                if (empty($evilOnProposal)) {
+                    $summary .= "⛔ PROPOSED TEAM HAS NO EVIL PLAYERS (" . implode(', ', $proposedNames) . "). If this runs, you CANNOT sabotage it — it will succeed. You should REJECT this proposal (vote: false) unless rejecting would look too suspicious given the game state.\n";
+                } else {
+                    $summary .= "✓ Evil player(s) on proposed team: " . implode(', ', $evilOnProposal) . ". Approving this enables sabotage.\n";
+                }
+            }
+
+            // In proposal phase: remind leader to include evil
+            if ($game->current_phase === 'team_proposal' && $game->current_leader_id === $player->id) {
+                $partner = implode(' or ', $knownEvilNames);
+                $summary .= "👑 YOU ARE THE LEADER. Include yourself and/or {$partner} in your proposal so you can fail the mission.\n";
+            }
+
+            // In mission phase: tell them if evil is on mission and what to do
+            if ($game->current_phase === 'mission' && $game->currentMission) {
+                $missionNames = $game->currentMission->teamMembers->pluck('player.name')->toArray();
+                $evilOnMission = array_values(array_intersect($evilNames, $missionNames));
+                if (!empty($evilOnMission)) {
+                    $missionDecision = $evilNeeds > 0 ? "FAIL this mission (mission_action: false) — evil needs {$evilNeeds} more failure(s)." : "Evil already has enough failures; consider success to maintain cover.";
+                    $summary .= "Evil on mission: " . implode(', ', $evilOnMission) . ". Recommendation: {$missionDecision}\n";
+                }
+            }
+            $summary .= "============================\n";
+        }
+
         // In debrief, reveal all roles
         if ($game->current_phase === 'debrief') {
             $summary .= "\n=== ALL ROLES REVEALED ===\n";
@@ -576,7 +673,7 @@ class GameLoop implements ShouldQueue
                 $summary .= "The game is over and all roles are now public. React to what happened! Express surprise, reveal your strategy, call out who deceived you, congratulate good plays. Be yourself — this is the fun part.\n";
                 break;
         }
-        
+
         return $summary;
     }
 
