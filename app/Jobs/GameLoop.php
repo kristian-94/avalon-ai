@@ -469,7 +469,7 @@ class GameLoop implements ShouldQueue
             'team_proposal' => $this->shouldTransitionFromTeamProposal($game),
             'team_voting' => $this->shouldTransitionFromTeamVoting($game),
             'mission' => $this->shouldTransitionFromMission($game),
-            'assassination' => true, // Always transition from assassination
+            'assassination' => $game->gameEvents()->where('event_type', 'assassination')->exists(),
             default => false
         };
 
@@ -619,6 +619,10 @@ class GameLoop implements ShouldQueue
         } else {
             if ($previousPhase === 'assassination') {
                 $assassination_event = $game->gameEvents()->where('event_type', 'assassination')->first();
+                if (!$assassination_event) {
+                    Log::error('Assassination transition with no event', ['game_id' => $game->id]);
+                    return;
+                }
                 $assassin_target = $assassination_event->event_data['assassin_target']['player_id'];
                 $merlin = $game->players()->where('role', 'merlin')->first();
 

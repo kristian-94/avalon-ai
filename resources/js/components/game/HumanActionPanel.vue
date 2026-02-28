@@ -17,7 +17,7 @@
     <div v-else-if="showVoting" class="space-y-2">
       <div class="text-white/70 text-sm mb-2">
         Vote on the proposed team
-        <span class="text-white/40 text-xs ml-1">(← Reject · Approve → · Enter confirm)</span>
+        <span class="text-white/40 text-xs ml-1">(← Approve · Reject → · Enter confirm · ↑ back)</span>
       </div>
       <div class="flex gap-2">
         <button
@@ -150,8 +150,8 @@ const requiredCount = computed(() => props.gameState?.currentMission?.required |
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (showVoting.value) {
-    if (e.key === 'ArrowRight') { focusedVote.value = true;  e.preventDefault() }
-    else if (e.key === 'ArrowLeft')  { focusedVote.value = false; e.preventDefault() }
+    if (e.key === 'ArrowRight') { focusedVote.value = false; e.preventDefault() }
+    else if (e.key === 'ArrowLeft')  { focusedVote.value = true;  e.preventDefault() }
     else if (e.key === 'Enter' && focusedVote.value !== null) { submitVote(focusedVote.value); e.preventDefault() }
 
   } else if (showProposal.value) {
@@ -173,7 +173,7 @@ const handleKeydown = (e: KeyboardEvent) => {
     if (e.key === 'Enter') { submitMissionAction(); e.preventDefault() }
   }
 
-  if (e.key === 'Escape') { emit('return-focus'); e.preventDefault() }
+  if (e.key === 'Escape' || e.key === 'ArrowUp') { emit('return-focus'); e.preventDefault() }
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────

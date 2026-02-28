@@ -19,22 +19,6 @@
         Send
       </button>
     </div>
-    <br>
-    <button
-        @click="handleRunGameLoop"
-        class="bg-white/20 text-white px-4 py-2 rounded-lg
-        hover:bg-white/30 focus:outline-none focus:ring-2 focus:ring-white/50"
-    >
-      Run game loop
-    </button>
-    <button
-        @click="handleForceWebsocketGamestate"
-        class="bg-white/20 text-white px-4 py-2 rounded-lg
-        hover:bg-white/30 focus:outline-none focus:ring-2 focus:ring-white/50"
-    >
-      Force websocket gamestate
-    </button>
-    <div id="runGameLoopResponse" class="text-white/70"></div>
   </div>
 </template>
 
@@ -70,42 +54,6 @@ const handleSend = () => {
 }
 
 const focus = () => chatInput.value?.focus()
-
-const handleRunGameLoop = () => {
-  fetch('http://localhost:8000/api/game/test-ai?runGameLoop=1')
-    .then(response => response.json())
-    .then(data => {
-      const responseElement = document.createElement('div')
-      responseElement.textContent = JSON.stringify(data)
-      const runGameLoopResponse = document.getElementById('runGameLoopResponse')
-      if (runGameLoopResponse?.firstChild) {
-        runGameLoopResponse.replaceChild(responseElement, runGameLoopResponse.firstChild)
-      } else {
-        runGameLoopResponse?.appendChild(responseElement)
-      }
-    })
-    .catch((error) => {
-      console.error('Error:', error)
-    })
-}
-
-const handleForceWebsocketGamestate = () => {
-  fetch('http://localhost:8000/api/game/test-ai?forceWebsocketGamestate=1')
-    .then(response => response.json())
-    .then(data => {
-      const responseElement = document.createElement('div')
-      responseElement.textContent = JSON.stringify(data)
-      const runGameLoopResponse = document.getElementById('runGameLoopResponse')
-      if (runGameLoopResponse?.firstChild) {
-        runGameLoopResponse.replaceChild(responseElement, runGameLoopResponse.firstChild)
-      } else {
-        runGameLoopResponse?.appendChild(responseElement)
-      }
-    })
-    .catch((error) => {
-      console.error('Error:', error)
-    })
-}
 
 defineExpose({ focus })
 </script>

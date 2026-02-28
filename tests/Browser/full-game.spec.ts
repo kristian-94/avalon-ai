@@ -24,7 +24,7 @@ const ACTION_WAIT  =  5_000   // how long to wait for an action panel to appear
 // Returns which panel is now visible, or null
 async function visiblePanel(page: Page): Promise<'voting' | 'proposal' | 'mission' | null> {
     // We detect panels by their unique hint text
-    const voting   = page.locator('text=← Reject · Approve →')
+    const voting   = page.locator('text=← Approve · Reject →')
     const proposal = page.locator('text=← → navigate')
     const mission  = page.locator('text=You are on this mission')
 

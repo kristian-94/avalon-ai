@@ -5,6 +5,11 @@
         <h2 class="text-xl font-bold text-white">Game Chat</h2>
       </div>
       <ChatMessages :messages="messages" :playerId="playerId"/>
+      <ChatInput
+          ref="chatInputRef"
+          @sendMessage="$emit('send-message', $event)"
+          @focus-panel="focusActionPanel"
+      />
       <HumanActionPanel
           v-if="gameState && gameId"
           ref="actionPanel"
@@ -13,11 +18,6 @@
           :players="players"
           :game-id="gameId"
           @return-focus="focusChatInput"
-      />
-      <ChatInput
-          ref="chatInputRef"
-          @sendMessage="$emit('send-message', $event)"
-          @focus-panel="focusActionPanel"
       />
     </div>
   </div>
