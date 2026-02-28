@@ -193,10 +193,16 @@ class Game extends Model
                 'event_data' => $e->event_data,
                 'created_at' => $e->created_at,
             ])->values()->toArray(),
+            'apiUsage' => [
+                'calls' => $game->api_calls,
+                'totalTokens' => $game->total_tokens,
+                'promptTokens' => $game->prompt_tokens,
+                'completionTokens' => $game->completion_tokens,
+            ],
             'players' => $game->players->map(function ($player) use ($game) {
                 $game->fresh();
                 // Include role if the game is finished
-                $role = $game->current_phase === 'finished' ? $player->role : null;
+                $role = in_array($game->current_phase, ['finished', 'debrief']) ? $player->role : null;
                 // Otherwise include the role for evil players during final assassination phase
                 if ($game->current_phase === 'assassination' && $player->role === 'assassin') {
                     $role = 'assassin';

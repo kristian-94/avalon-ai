@@ -18,8 +18,8 @@ import { test, expect, Page } from '@playwright/test'
  */
 
 const BASE_URL     = 'http://localhost:8000'
-const GAME_TIMEOUT = 90_000   // 90 s ceiling
-const ACTION_WAIT  =  5_000   // how long to wait for an action panel to appear
+const GAME_TIMEOUT = 240_000  // 4 min ceiling (real OpenAI is slower than random AI)
+const ACTION_WAIT  =  15_000  // how long to wait for an action panel to appear
 
 // Returns which panel is now visible, or null
 async function visiblePanel(page: Page): Promise<'voting' | 'proposal' | 'mission' | null> {
@@ -49,7 +49,7 @@ async function waitForActionOrGameEnd(page: Page): Promise<'voting' | 'proposal'
 }
 
 test('human plays through a complete game without getting stuck', async ({ page }) => {
-    page.setDefaultTimeout(90_000)
+    page.setDefaultTimeout(240_000)
 
     // ── 1. Navigate to home and start a game ────────────────────────────────
     await page.goto(BASE_URL)
@@ -90,6 +90,11 @@ test('human plays through a complete game without getting stuck', async ({ page 
 
         if (result === 'finished') {
             console.log(`Game finished — rounds:${rounds} votes:${votescast} proposals:${proposals} missions:${missionCards}`)
+            // Log assassination details if present
+            const assassinationEntry = page.locator('text=/Assassin targeted/i').first()
+            if (await assassinationEntry.isVisible()) {
+                console.log(`Assassination: ${await assassinationEntry.textContent()}`)
+            }
             break
         }
 
@@ -148,6 +153,9 @@ test('human plays through a complete game without getting stuck', async ({ page 
     const elapsed = ((Date.now() - gameStart) / 1000).toFixed(1)
     console.log(`Total game time: ${elapsed}s`)
 
+    // Wait for debrief to finish (phase transitions to 'finished' after all bots have spoken)
+    await page.waitForFunction(() => !document.querySelector('[class*="animate-pulse"]')?.textContent?.includes('Debrief'), { timeout: 60_000 }).catch(() => {})
+
     // Game must reach a winner — wait for VictoryScreen banner
     const victoryBanner = page.locator('text=/Good Triumphs!|Evil Prevails!/').first()
     await expect(victoryBanner).toBeVisible({ timeout: 10_000 })
@@ -155,9 +163,25 @@ test('human plays through a complete game without getting stuck', async ({ page 
     const bannerText = await victoryBanner.textContent()
     console.log(`Winner: ${bannerText}`)
 
+    // Log API usage for cost estimation (gpt-4o-mini: $0.150/1M prompt, $0.600/1M completion)
+    const gameId = page.url().match(/\/game\/(\d+)/)?.[1]
+    if (gameId) {
+        const stateResp = await page.request.get(`${BASE_URL}/api/game/${gameId}/state`)
+        const state = await stateResp.json()
+        const usage = state?.apiUsage
+        if (usage) {
+            const promptCost  = (usage.promptTokens     / 1_000_000) * 0.150
+            const completionCost = (usage.completionTokens / 1_000_000) * 0.600
+            const totalCost   = promptCost + completionCost
+            console.log(`API calls: ${usage.calls}`)
+            console.log(`Tokens — prompt: ${usage.promptTokens}, completion: ${usage.completionTokens}, total: ${usage.totalTokens}`)
+            console.log(`Est. cost: $${totalCost.toFixed(4)} (prompt $${promptCost.toFixed(4)} + completion $${completionCost.toFixed(4)})`)
+        }
+    }
+
     // VictoryScreen must show mission counts (proves real end state, not a false positive)
-    await expect(page.locator('text=Successful')).toBeVisible()
-    await expect(page.locator('text=Failed')).toBeVisible()
+    await expect(page.getByText('Successful', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Failed', { exact: true }).first()).toBeVisible()
 
     // Human must have taken at least one action (not a ghost game)
     const totalActions = votescast + proposals + missionCards

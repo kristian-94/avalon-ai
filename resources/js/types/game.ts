@@ -6,6 +6,8 @@ export interface Player {
     is_human: boolean
     player_index: number
     name: string
+    role?: string | null
+    roleLabel?: string | null
 }
 
 export interface MissionResult {
@@ -79,7 +81,7 @@ export interface Game {
 }
 
 export interface GameState {
-    currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission' | 'finished'
+    currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission' | 'assassination' | 'debrief' | 'finished'
     turnCount: number
     currentLeader?: number
     assassination?: Assassination

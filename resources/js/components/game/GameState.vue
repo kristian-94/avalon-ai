@@ -6,41 +6,45 @@
     />
 
     <!-- Game Progress -->
-    <div v-if="gameState?.currentPhase === 'finished'" class="mb-4">
-      <VictoryScreen :game-state="gameState" :players="players" :game="game"/>
+    <div v-if="gameState?.currentPhase === 'finished' || gameState?.currentPhase === 'debrief'" class="mb-4">
+      <VictoryScreen :game-state="gameState" :players="players" :game="game" :phase="gameState?.currentPhase"/>
+      <div v-if="gameState?.currentPhase === 'debrief'" class="mt-2 text-center text-white/50 text-sm animate-pulse">
+        Debrief in progress…
+      </div>
     </div>
     <div v-else class="mb-4 bg-black/40 backdrop-blur-sm rounded-lg p-4">
       <div class="text-white/70">
 
-        <div class="flex-1 relative flex items-center justify-between">
-          <!-- Connecting line -->
-          <div class="absolute h-0.5 bg-white/20 left-0 right-0 top-1/2 -translate-y-1/2"></div>
-
-          <!-- Phase dots -->
+        <div class="flex items-center w-full">
           <template v-for="(phase, index) in phases" :key="phase.id">
-            <div class="relative z-10 flex flex-col items-center gap-2">
-              <div
-                  :class="[
-                  'w-4 h-4 rounded-full transition-colors duration-300',
-                  phase.id === gameState?.currentPhase
-                    ? 'bg-blue-500 ring-4 ring-blue-500/20'
-                    : isPhaseComplete(phase.id)
-                      ? 'bg-green-500'
-                      : 'bg-white/20',
-                ]"
-              ></div>
-              <div
-                  :class="[
-                  'text-sm whitespace-nowrap transition-colors duration-300',
-                  phase.id === gameState?.currentPhase
-                    ? 'text-blue-500'
-                    : isPhaseComplete(phase.id)
-                      ? 'text-green-500'
-                      : 'text-white/60'
-                ]"
-              >
-                {{ phase.label }}
+            <!-- Arrow separator -->
+            <template v-if="index > 0">
+              <div class="flex-1 flex items-center mx-2">
+                <div :class="['h-0.5 flex-1', isPhaseComplete(phases[index - 1].id) ? 'bg-green-500/60' : 'bg-white/20']"></div>
+                <span :class="['text-2xl font-bold mx-1 leading-none', isPhaseComplete(phases[index - 1].id) ? 'text-green-500/80' : 'text-white/30']">›</span>
+                <div :class="['h-0.5 flex-1', isPhaseComplete(phases[index - 1].id) ? 'bg-green-500/60' : 'bg-white/20']"></div>
               </div>
+            </template>
+
+            <!-- Phase node -->
+            <div class="flex flex-col items-center gap-1.5">
+              <div :class="[
+                'rounded-full flex items-center justify-center font-bold transition-all duration-300',
+                phase.id === gameState?.currentPhase
+                  ? 'w-12 h-12 text-lg bg-blue-500 text-white ring-8 ring-blue-400/25 shadow-lg shadow-blue-500/40 animate-pulse'
+                  : isPhaseComplete(phase.id)
+                    ? 'w-9 h-9 text-base bg-green-500 text-white'
+                    : 'w-9 h-9 text-sm bg-white/10 text-white/30',
+              ]">
+                <span v-if="isPhaseComplete(phase.id)">✓</span>
+                <span v-else>{{ index + 1 }}</span>
+              </div>
+              <span :class="[
+                'whitespace-nowrap font-medium',
+                phase.id === gameState?.currentPhase ? 'text-sm text-blue-400'
+                  : isPhaseComplete(phase.id) ? 'text-xs text-green-400'
+                  : 'text-xs text-white/30'
+              ]">{{ phase.label }}</span>
             </div>
           </template>
         </div>

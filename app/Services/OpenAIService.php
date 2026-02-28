@@ -81,6 +81,8 @@ class OpenAIService implements AgentService
                 return $this->getFallbackResponse();
             }
 
+            $arguments['_usage'] = $responseData['usage'] ?? null;
+
             return $arguments;
 
         } catch (\Exception $e) {
@@ -121,11 +123,11 @@ class OpenAIService implements AgentService
         $baseProperties = [
             'message' => [
                 'type' => 'string',
-                'description' => 'The message to be displayed in public chat. Be concise and relevant to the current phase.',
+                'description' => 'Your in-character dialogue for the public chat. Express opinions, suspicions, emotions, and reasoning in your character\'s voice. IMPORTANT: Do NOT narrate your vote or game action (e.g. never say "I vote to approve" or "I propose Alex and Sam" — the game already shows that). Instead, say WHY you feel the way you do, what you observe, who you trust or distrust. Keep it natural and conversational, 1-2 sentences.',
             ],
             'reasoning' => [
                 'type' => 'string',
-                'description' => 'Private reasoning for your actions and thoughts',
+                'description' => 'Private internal reasoning — your true thoughts and strategy, not visible to others',
             ],
         ];
         

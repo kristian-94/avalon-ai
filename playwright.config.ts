@@ -2,7 +2,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
     testDir: './tests/Browser',
-    timeout: 120_000,  // 2min per test (human-in-the-loop adds interaction time)
+    globalSetup: './tests/Browser/global-setup.ts',
+    globalTeardown: './tests/Browser/global-setup.ts',
+    timeout: 300_000,  // 5min per test (real OpenAI is slower than random AI)
     expect: {
         timeout: 10_000,
     },

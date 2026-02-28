@@ -65,6 +65,7 @@ class GameLoop implements ShouldQueue
 
         // Determine which players should act based on the current phase
         $eligiblePlayers = $this->getEligiblePlayers($game);
+        $eligiblePlayers = $this->orderEligiblePlayers($game, $eligiblePlayers);
 
         // Process turns for all eligible AI players in this job
         $aiTurnsProcessed = 0;
@@ -89,11 +90,20 @@ class GameLoop implements ShouldQueue
         self::dispatch($this->gameId)->delay(now()->addMilliseconds($delayMs));
     }
 
-    public function endGame(Game $game, string $winner): void
+    public function concludeGame(Game $game): void
     {
         $game->update([
             'ended_at' => now(),
             'current_phase' => 'finished',
+        ]);
+        broadcast(new GameStateUpdate($game));
+    }
+
+    public function endGame(Game $game, string $winner): void
+    {
+        $game->update([
+            // Don't set ended_at yet — debrief phase first
+            'current_phase' => 'debrief',
             'winner' => $winner,
         ]);
 
@@ -184,14 +194,108 @@ class GameLoop implements ShouldQueue
 
             'assassination' => $game->players()->where('role', 'assassin')->get()->all(),
 
+            'debrief' => (function () use ($game) {
+                // Trigger: game_end event OR latest human message, whichever is more recent
+                $gameEndEvent = $game->gameEvents()->where('event_type', 'game_end')->first();
+                $gameEndTime = $gameEndEvent?->created_at ?? now();
+
+                $lastHumanMessage = $game->messages()
+                    ->where('message_type', 'public_chat')
+                    ->whereHas('player', fn ($q) => $q->where('is_human', true))
+                    ->latest()
+                    ->first();
+
+                $since = ($lastHumanMessage && $lastHumanMessage->created_at > $gameEndTime)
+                    ? $lastHumanMessage->created_at
+                    : $gameEndTime;
+
+                return $game->players()
+                    ->where('is_human', false)
+                    ->whereDoesntHave('messages', function ($q) use ($since) {
+                        $q->where('message_type', 'public_chat')
+                            ->where('created_at', '>=', $since);
+                    })
+                    ->get()
+                    ->all();
+            })(),
+
             default => []
         };
+    }
+
+    /**
+     * Order eligible players using name-mention weighting + rolling cooldown.
+     * - Players mentioned by name in the last message get a higher draw weight (8×).
+     * - The last 3 speakers get a graduated penalty so everyone gets heard:
+     *     position 0 (last spoke):   ×0.1
+     *     position 1 (2nd last):     ×0.35
+     *     position 2 (3rd last):     ×0.65
+     * Weights are scaled ×10 to keep integer arithmetic throughout.
+     */
+    private function orderEligiblePlayers(Game $game, array $players): array
+    {
+        if (count($players) <= 1) {
+            return $players;
+        }
+
+        $recentMessages = $game->messages()
+            ->where('message_type', 'public_chat')
+            ->latest()
+            ->take(3)
+            ->get();
+
+        // [most-recent speaker id, 2nd, 3rd] — may have duplicates (same person spoke twice)
+        $recentSpeakerIds = $recentMessages->pluck('player_id')->toArray();
+        $lastMessageText  = strtolower($recentMessages->first()?->content ?? '');
+
+        // Cooldown factors by recency position (out of 10)
+        $cooldownFactors = [1, 4, 7]; // positions 0, 1, 2
+
+        $weighted = [];
+        foreach ($players as $player) {
+            // Base: 10; name-mention boost: 80 (8×)
+            $weight = stripos($lastMessageText, strtolower($player->name)) !== false ? 80 : 10;
+
+            // Apply the steepest cooldown found for this player in the last 3 messages
+            $pos = array_search($player->id, $recentSpeakerIds);
+            if ($pos !== false) {
+                $weight = max(1, (int) ($weight * $cooldownFactors[$pos] / 10));
+            }
+
+            $weighted[] = ['player' => $player, 'weight' => $weight];
+        }
+
+        // Weighted random draw without replacement
+        $ordered = [];
+        while (! empty($weighted)) {
+            $totalWeight = array_sum(array_column($weighted, 'weight'));
+            $rand        = mt_rand(1, max(1, $totalWeight));
+            $cumulative  = 0;
+            foreach ($weighted as $i => $item) {
+                $cumulative += $item['weight'];
+                if ($rand <= $cumulative) {
+                    $ordered[] = $item['player'];
+                    array_splice($weighted, $i, 1);
+                    break;
+                }
+            }
+        }
+
+        return $ordered;
     }
 
     public function processAIPlayerTurn(Game $game, Player $player): void
     {
         $messages = $this->prepareAIContext($game, $player);
         $response = Agent::getChatResponse($messages);
+
+        // Track API usage
+        if (! empty($response['_usage'])) {
+            $game->increment('api_calls');
+            $game->increment('total_tokens', $response['_usage']['total_tokens'] ?? 0);
+            $game->increment('prompt_tokens', $response['_usage']['prompt_tokens'] ?? 0);
+            $game->increment('completion_tokens', $response['_usage']['completion_tokens'] ?? 0);
+        }
 
         // Bail only if completely empty
         $hasAction = isset($response['vote']) || isset($response['team_proposal'])
@@ -266,6 +370,7 @@ class GameLoop implements ShouldQueue
                     'assassin_target' => [
                         'player_name' => $response['assassination_target'],
                         'player_id' => $targetPlayer->id,
+                        'player_role' => $targetPlayer->role,
                     ],
                 ],
             ]);
@@ -412,8 +517,18 @@ class GameLoop implements ShouldQueue
             }
         }
         
+        // In debrief, reveal all roles
+        if ($game->current_phase === 'debrief') {
+            $summary .= "\n=== ALL ROLES REVEALED ===\n";
+            foreach ($game->players as $p) {
+                $you = $p->id === $player->id ? ' (YOU)' : '';
+                $summary .= "  {$p->name}: {$p->role}{$you}\n";
+            }
+            $summary .= "Winner: " . ($game->winner === 'good' ? 'Good team' : 'Evil team') . "\n";
+        }
+
         $summary .= "=========================\n";
-        
+
         // Add phase-specific action reminder
         $summary .= "\nACTION REQUIRED: ";
         switch ($game->current_phase) {
@@ -457,6 +572,9 @@ class GameLoop implements ShouldQueue
                     $summary .= "The Assassin is choosing their target. You can try to mislead or stay quiet.\n";
                 }
                 break;
+            case 'debrief':
+                $summary .= "The game is over and all roles are now public. React to what happened! Express surprise, reveal your strategy, call out who deceived you, congratulate good plays. Be yourself — this is the fun part.\n";
+                break;
         }
         
         return $summary;
@@ -470,6 +588,7 @@ class GameLoop implements ShouldQueue
             'team_voting' => $this->shouldTransitionFromTeamVoting($game),
             'mission' => $this->shouldTransitionFromMission($game),
             'assassination' => $game->gameEvents()->where('event_type', 'assassination')->exists(),
+            'debrief' => $this->shouldTransitionFromDebrief($game),
             default => false
         };
 
@@ -548,6 +667,11 @@ class GameLoop implements ShouldQueue
         return $teamSize > 0 && $submittedVotes >= $teamSize;
     }
 
+    private function shouldTransitionFromDebrief(Game $game): bool
+    {
+        return false; // Debrief runs indefinitely — bots respond to each human message
+    }
+
     public function transitionToNextPhase(Game $game): void
     {
         $previousPhase = $game->current_phase;
@@ -557,19 +681,22 @@ class GameLoop implements ShouldQueue
             'setup', 'mission' => 'team_proposal',
             'team_proposal' => 'team_voting',
             'team_voting' => $this->determineNextPhaseAfterVoting($game),
-            'assassination' => 'finished',
+            'assassination' => 'debrief',
+            'debrief' => 'finished',
             default => $game->current_phase
         };
 
         if ($previousPhase === 'team_voting') {
             $game->current_proposal_id = null;
             $totalVotes = $game->currentProposal->votes()->count();
-            $requiredVotes = $game->players()->count() - 1; // Everyone must vote on who goes on the mission, except the leader
+            $nonLeaderCount = $game->players()->count() - 1; // Everyone votes except the leader
 
-            if ($totalVotes >= $requiredVotes) {
-                $approvalVotes = $game->currentProposal->votes()->where('approved', true)->count();
-                $requiredVotes = (($game->players()->count() - 1) / 2) + 1; // Majority vote required
-                $voteApproved = $approvalVotes >= $requiredVotes;
+            if ($totalVotes >= $nonLeaderCount) {
+                $allVotes = $game->currentProposal->votes()->with('player')->get();
+                $approvalVotes = $allVotes->where('approved', true)->count();
+                $rejectionVotes = $allVotes->where('approved', false)->count();
+                $majorityThreshold = ($nonLeaderCount / 2) + 1; // Majority required
+                $voteApproved = $approvalVotes >= $majorityThreshold;
 
                 if ($voteApproved) {
                     // If approved, move team members to mission (idempotent)
@@ -610,13 +737,22 @@ class GameLoop implements ShouldQueue
                     'event_data' => [
                         'approved' => $voteApproved,
                         'votes_for' => $approvalVotes,
-                        'votes_against' => $requiredVotes - $approvalVotes,
+                        'votes_against' => $rejectionVotes,
+                        'breakdown' => $allVotes->map(fn ($v) => [
+                            'player' => $v->player->name,
+                            'approved' => (bool) $v->approved,
+                        ])->values()->toArray(),
                     ],
                 ]);
 
                 broadcast(new GameStateUpdate($game));
             }
         } else {
+            if ($previousPhase === 'debrief') {
+                $this->concludeGame($game);
+                return;
+            }
+
             if ($previousPhase === 'assassination') {
                 $assassination_event = $game->gameEvents()->where('event_type', 'assassination')->first();
                 if (!$assassination_event) {
@@ -663,6 +799,10 @@ class GameLoop implements ShouldQueue
                             'success' => $missionSucceeded,
                             'fail_votes' => $failVotes,
                             'team' => $currentMission->teamMembers->pluck('player.name')->values()->toArray(),
+                            'breakdown' => $currentMission->teamMembers->map(fn ($m) => [
+                                'player' => $m->player->name,
+                                'success' => (bool) $m->vote_success,
+                            ])->values()->toArray(),
                         ],
                     ]);
 
@@ -990,6 +1130,7 @@ class GameLoop implements ShouldQueue
                             'assassin_target' => [
                                 'player_name' => $target->name,
                                 'player_id' => $target->id,
+                                'player_role' => $target->role,
                             ],
                         ],
                     ]);

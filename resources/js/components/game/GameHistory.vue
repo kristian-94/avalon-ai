@@ -6,8 +6,25 @@
       </div>
       <div ref="eventsContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
         <div v-for="event in events" :key="event.id"
-             :class="['rounded-lg px-3 py-2 text-sm', eventClass(event)]">
+             :class="['rounded-lg px-3 py-2 text-sm relative', eventClass(event), hasBreakdown(event) ? 'group/evt cursor-default' : '']">
           {{ formatEvent(event) }}
+          <!-- Breakdown tooltip on hover -->
+          <div v-if="hasBreakdown(event)"
+               class="absolute left-0 right-0 top-full mt-1 z-10 bg-black/90 border border-white/20 rounded-lg px-3 py-2 invisible group-hover/evt:visible opacity-0 group-hover/evt:opacity-100 transition-opacity pointer-events-none">
+            <template v-if="event.event_type === 'team_vote'">
+              <div v-for="v in event.event_data.breakdown" :key="v.player" class="flex items-center gap-2 text-xs">
+                <span :class="v.approved ? 'text-green-400' : 'text-red-400'">{{ v.approved ? '✓' : '✗' }}</span>
+                <span class="text-white/80">{{ v.player }}</span>
+              </div>
+            </template>
+            <template v-else-if="event.event_type === 'mission_complete'">
+              <div v-for="v in event.event_data.breakdown" :key="v.player" class="flex items-center gap-2 text-xs">
+                <span v-if="props.rolesRevealed" :class="v.success ? 'text-green-400' : 'text-red-400'">{{ v.success ? '✓' : '✗' }}</span>
+                <span v-else class="text-white/30">?</span>
+                <span class="text-white/80">{{ v.player }}</span>
+              </div>
+            </template>
+          </div>
         </div>
         <div v-if="events.length === 0" class="text-white/50 text-center mt-8">
           No events yet
@@ -23,6 +40,7 @@ import type {GameEvent} from "../../types/game"
 
 const props = defineProps<{
   events: GameEvent[]
+  rolesRevealed?: boolean
 }>()
 
 const eventsContainer = ref<HTMLElement | null>(null)
@@ -59,6 +77,17 @@ const eventClass = (event: GameEvent): string => {
   }
 }
 
+const hasBreakdown = (event: GameEvent): boolean => {
+  const b = event.event_data?.breakdown
+  if (!b || b.length === 0) return false
+  if (event.event_type === 'team_vote') {
+    // Only show tooltip if not unanimous
+    return b.some((v: any) => v.approved) && b.some((v: any) => !v.approved)
+  }
+  if (event.event_type === 'mission_complete') return true
+  return false
+}
+
 const formatEvent = (event: GameEvent): string => {
   const data = event.event_data
   switch (event.event_type) {
@@ -74,8 +103,10 @@ const formatEvent = (event: GameEvent): string => {
       const outcome = data.success ? '\u2713 Success' : '\u2717 Failed'
       return `Mission ${data.mission_number} — ${outcome} (${data.fail_votes} fail votes)`
     }
-    case 'assassination':
-      return `Assassin targeted ${data.assassin_target?.player_name || 'unknown'}`
+    case 'assassination': {
+      const role = data.assassin_target?.player_role || 'unknown role'
+      return `Assassin targeted ${data.assassin_target?.player_name || 'unknown'} (${role})`
+    }
     case 'game_end':
       return data.winner === 'good' ? 'Good wins' : 'Evil wins'
     default:

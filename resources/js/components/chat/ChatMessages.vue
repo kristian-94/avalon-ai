@@ -6,7 +6,11 @@
            'transition-all duration-300',
            message.id === latestMessageId ? 'animate-highlight' : ''
          ]">
-      <ChatMessage :message="message" :isOwnMessage="message.player_id === playerId"/>
+      <ChatMessage
+          :message="message"
+          :isOwnMessage="message.player_id === playerId"
+          :playerRole="rolesRevealed ? playerRoleMap[message.player_id ?? -1] : undefined"
+      />
     </div>
   </div>
 </template>
@@ -14,12 +18,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import ChatMessage from './ChatMessage.vue'
-import type {Message} from "../../types/game";
+import type {Message, Player} from "../../types/game";
 
 const props = defineProps<{
   messages: Message[]
   playerId: number
+  players?: Player[]
+  rolesRevealed?: boolean
 }>()
+
+const playerRoleMap = computed(() => {
+  const map: Record<number, string> = {}
+  props.players?.forEach(p => { if (p.role) map[p.id] = p.roleLabel ?? p.role })
+  return map
+})
 
 const messagesContainer = ref<HTMLElement | null>(null)
 const latestMessageId = computed(() => {

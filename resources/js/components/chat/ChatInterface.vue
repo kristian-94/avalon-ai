@@ -4,7 +4,12 @@
       <div class="p-4 border-b border-white/20">
         <h2 class="text-xl font-bold text-white">Game Chat</h2>
       </div>
-      <ChatMessages :messages="messages" :playerId="playerId"/>
+      <ChatMessages
+          :messages="messages"
+          :playerId="playerId"
+          :players="players"
+          :rolesRevealed="gameState?.currentPhase === 'debrief' || gameState?.currentPhase === 'finished'"
+      />
       <ChatInput
           ref="chatInputRef"
           @sendMessage="$emit('send-message', $event)"
