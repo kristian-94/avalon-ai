@@ -25,9 +25,15 @@ class GameLoop implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    private $minThinkingTime = 2; // Minimum seconds before AI responds
+    private int $minThinkingTime;
 
-    private $maxThinkingTime = 5; // Maximum seconds before AI responds
+    private int $maxThinkingTime;
+
+    public function __construct(public int $gameId)
+    {
+        $this->minThinkingTime = (int) env('AI_THINKING_TIME_MIN', 2);
+        $this->maxThinkingTime = (int) env('AI_THINKING_TIME_MAX', 5);
+    }
     
     // Phase timeout settings (in seconds)
     private $phaseTimeouts = [
@@ -37,8 +43,6 @@ class GameLoop implements ShouldQueue
         'mission' => 120,       // 2 minutes for mission execution
         'assassination' => 180, // 3 minutes for assassination
     ];
-
-    public function __construct(public int $gameId) {}
 
     public function handle(): void
     {
@@ -61,41 +65,28 @@ class GameLoop implements ShouldQueue
 
         // Determine which players should act based on the current phase
         $eligiblePlayers = $this->getEligiblePlayers($game);
-        
-        // For discussion phases, limit to one speaker at a time
-        if (in_array($game->current_phase, ['setup', 'team_proposal', 'mission']) && count($eligiblePlayers) > 1) {
-            // Get the last speaker
-            $lastMessage = $game->messages()
-                ->where('message_type', 'public_chat')
-                ->whereNotNull('player_id')
-                ->orderBy('id', 'desc')
-                ->first();
-                
-            if ($lastMessage) {
-                // Filter out the last speaker to ensure conversation flow
-                $eligiblePlayers = array_filter($eligiblePlayers, function($player) use ($lastMessage) {
-                    return $player->id !== $lastMessage->player_id;
-                });
-            }
-            
-            // Pick one random eligible player to speak next
-            if (count($eligiblePlayers) > 0) {
-                $eligiblePlayers = [array_values($eligiblePlayers)[array_rand(array_values($eligiblePlayers))]];
-            }
-        }
 
-        // Process turns for eligible AI players
+        // Process turns for all eligible AI players in this job
+        $aiTurnsProcessed = 0;
         foreach ($eligiblePlayers as $player) {
             if (! $player->is_human) {
                 $this->processAIPlayerTurn($game, $player);
+                $aiTurnsProcessed++;
             }
         }
+
+        // Refresh game state before phase check — human API calls may have already transitioned
+        $game = $game->fresh(['players', 'messages', 'gameEvents', 'currentMission', 'currentMission.teamMembers', 'currentProposal', 'currentProposal.teamMembers', 'currentProposal.votes', 'missions']);
 
         // Check if we need to transition to a new phase
         $this->checkPhaseTransition($game);
 
-        // Schedule the next turn
-        self::dispatch($this->gameId)->delay(now()->addSeconds(random_int($this->minThinkingTime, $this->maxThinkingTime)));
+        // When waiting for human input (no AI work done), use a poll interval to avoid queue flooding.
+        // Otherwise use the configured thinking time.
+        $thinkingMs = random_int($this->minThinkingTime, $this->maxThinkingTime) * 1000;
+        $delayMs = ($aiTurnsProcessed === 0) ? max(200, $thinkingMs) : $thinkingMs;
+
+        self::dispatch($this->gameId)->delay(now()->addMilliseconds($delayMs));
     }
 
     public function endGame(Game $game, string $winner): void
@@ -163,6 +154,7 @@ class GameLoop implements ShouldQueue
     {
         return match ($game->current_phase) {
             'setup' => $game->players()
+                ->where('is_human', false)
                 ->whereDoesntHave('messages', function ($query) {
                     $query->where('message_type', 'public_chat');
                 })
@@ -201,8 +193,10 @@ class GameLoop implements ShouldQueue
         $messages = $this->prepareAIContext($game, $player);
         $response = Agent::getChatResponse($messages);
 
-        $needsMessage = true;
-        if (empty($response['message'])) {
+        // Bail only if completely empty
+        $hasAction = isset($response['vote']) || isset($response['team_proposal'])
+            || isset($response['mission_action']) || isset($response['assassination_target']);
+        if (empty($response['message']) && !$hasAction) {
             Log::error('Empty AI response', ['game_id' => $game->id, 'player_id' => $player->id]);
 
             return;
@@ -218,7 +212,6 @@ class GameLoop implements ShouldQueue
             $teamMember = $game->currentMission->teamMembers()->where('player_id', $player->id)->first();
             if ($teamMember) {
                 $teamMember->update(['vote_success' => $response['mission_action']]);
-                $needsMessage = false; // No need to send a message for mission action
             }
         }
 
@@ -246,10 +239,25 @@ class GameLoop implements ShouldQueue
 
             $game->current_proposal_id = $proposal->id;
             $game->save();
+
+            GameEvent::create([
+                'game_id' => $game->id,
+                'event_type' => 'team_proposal',
+                'event_data' => [
+                    'proposed_by' => $player->name,
+                    'team' => $proposedPlayers->pluck('name')->values()->toArray(),
+                    'proposal_number' => $proposal->proposal_number,
+                ],
+            ]);
         }
+
+        // Handle assassination
         if ($game->current_phase === 'assassination' && isset($response['assassination_target'])) {
             $targetPlayer = $game->players()->where('name', $response['assassination_target'])->first();
-            assert($targetPlayer !== null);
+            if (!$targetPlayer) {
+                Log::error('Assassination target not found', ['target' => $response['assassination_target'], 'game_id' => $game->id]);
+                return;
+            }
 
             GameEvent::create([
                 'game_id' => $game->id,
@@ -263,8 +271,8 @@ class GameLoop implements ShouldQueue
             ]);
         }
 
-        if ($needsMessage) {
-            // Create and broadcast the message
+        // Create message only if non-empty
+        if (!empty($response['message'])) {
             $message = Message::create([
                 'game_id' => $game->id,
                 'player_id' => $player->id,
@@ -494,11 +502,16 @@ class GameLoop implements ShouldQueue
 
     public function shouldTransitionFromSetup(Game $game): bool
     {
-        // Transition from setup if all players have sent their initial messages
-        return $game->messages()
+        // Transition when all AI players have sent their initial messages.
+        // The human player is not required to speak before the game begins.
+        $aiPlayerCount = $game->players()->where('is_human', false)->count();
+        $aiMessageCount = $game->messages()
             ->where('message_type', 'public_chat')
+            ->whereHas('player', fn ($q) => $q->where('is_human', false))
             ->distinct('player_id')
-            ->count() >= $game->players()->count();
+            ->count();
+
+        return $aiMessageCount >= $aiPlayerCount;
     }
 
     public function shouldTransitionFromTeamProposal(Game $game): bool
@@ -559,9 +572,9 @@ class GameLoop implements ShouldQueue
                 $voteApproved = $approvalVotes >= $requiredVotes;
 
                 if ($voteApproved) {
-                    // If approved, move team members to mission
+                    // If approved, move team members to mission (idempotent)
                     foreach ($game->currentProposal->teamMembers as $member) {
-                        MissionTeamMember::create([
+                        MissionTeamMember::firstOrCreate([
                             'mission_id' => $game->currentMission->id,
                             'player_id' => $member->player_id,
                         ]);
@@ -627,15 +640,27 @@ class GameLoop implements ShouldQueue
             } elseif ($previousPhase === 'mission' || $previousPhase === 'setup') {
                 // We're transitioning after a mission, set up the next mission
                 if ($previousPhase === 'mission') {
-                    $requiredVotes = $game->currentMission->teamMembers()->count();
+                    $currentMission = $game->currentMission;
+                    $requiredVotes = $currentMission->teamMembers()->count();
 
-                    $failVotes = $game->currentMission->teamMembers()->where('vote_success', false)->count();
+                    $failVotes = $currentMission->teamMembers()->where('vote_success', false)->count();
                     $missionSucceeded = $failVotes === 0; // If there are any fail votes, the mission fails.
 
-                    $game->currentMission->status = $missionSucceeded ? 'success' : 'fail';
-                    $game->currentMission->success_votes = $requiredVotes - $failVotes;
-                    $game->currentMission->fail_votes = $failVotes;
-                    $game->currentMission->save();
+                    $currentMission->status = $missionSucceeded ? 'success' : 'fail';
+                    $currentMission->success_votes = $requiredVotes - $failVotes;
+                    $currentMission->fail_votes = $failVotes;
+                    $currentMission->save();
+
+                    GameEvent::create([
+                        'game_id' => $game->id,
+                        'event_type' => 'mission_complete',
+                        'event_data' => [
+                            'mission_number' => $currentMission->mission_number,
+                            'success' => $missionSucceeded,
+                            'fail_votes' => $failVotes,
+                            'team' => $currentMission->teamMembers->pluck('player.name')->values()->toArray(),
+                        ],
+                    ]);
 
                     // Check if game should end
                     $successfulMissions = $game->missions()->where('status', 'success')->count();

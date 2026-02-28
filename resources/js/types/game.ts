@@ -61,6 +61,13 @@ export interface Assassination {
     wasSuccessful: boolean
 }
 
+export interface GameEvent {
+    id: number
+    event_type: 'game_start' | 'game_end' | 'team_proposal' | 'team_vote' | 'mission_complete' | 'assassination'
+    event_data: Record<string, any>
+    created_at: string
+}
+
 export interface Game {
     id: number
     game_state: GameState,

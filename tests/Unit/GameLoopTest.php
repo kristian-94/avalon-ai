@@ -127,6 +127,62 @@ class GameLoopTest extends TestCase
         Event::assertDispatched(GameStateUpdate::class);
     }
 
+    // Regression: setup phase was blocked forever when a human player hadn't typed a message.
+    // shouldTransitionFromSetup must only require AI players to have spoken.
+
+    public function test_setup_transitions_without_human_speaking()
+    {
+        $game = GameSetupService::initializeGame(1);
+        $gameLoop = new GameLoop($game->id);
+        $aiPlayers = $game->players()->where('is_human', false)->get();
+        $humanPlayer = $game->players()->where('is_human', true)->first();
+
+        $this->assertNotNull($humanPlayer);
+        $this->assertFalse($gameLoop->shouldTransitionFromSetup($game));
+
+        // Only AI players speak — human stays silent
+        foreach ($aiPlayers as $player) {
+            Message::create([
+                'game_id' => $game->id,
+                'player_id' => $player->id,
+                'message_type' => 'public_chat',
+                'content' => 'Hello!',
+            ]);
+        }
+
+        $this->assertTrue($gameLoop->shouldTransitionFromSetup($game));
+    }
+
+    public function test_setup_does_not_transition_until_all_ai_players_have_spoken()
+    {
+        $game = GameSetupService::initializeGame(1);
+        $gameLoop = new GameLoop($game->id);
+        $aiPlayers = $game->players()->where('is_human', false)->get();
+
+        // Only some AI players speak
+        foreach ($aiPlayers->take($aiPlayers->count() - 1) as $player) {
+            Message::create([
+                'game_id' => $game->id,
+                'player_id' => $player->id,
+                'message_type' => 'public_chat',
+                'content' => 'Hello!',
+            ]);
+        }
+
+        $this->assertFalse($gameLoop->shouldTransitionFromSetup($game));
+    }
+
+    public function test_human_excluded_from_eligible_players_in_setup()
+    {
+        $game = GameSetupService::initializeGame(1);
+        $gameLoop = new GameLoop($game->id);
+        $humanPlayer = $game->players()->where('is_human', true)->first();
+
+        $eligibleIds = collect($gameLoop->getEligiblePlayers($game))->pluck('id');
+
+        $this->assertNotContains($humanPlayer->id, $eligibleIds);
+    }
+
     public function test_phase_transition_from_team_proposal_to_team_voting()
     {
         $this->game->update([
@@ -904,5 +960,252 @@ class GameLoopTest extends TestCase
         $this->assertNotEmpty($endMessages, 'Should have game end messages');
 
         Event::assertDispatched(GameStateUpdate::class);
+    }
+
+    public function test_eligible_players_excludes_human_in_setup(): void
+    {
+        // Human players are excluded from setup eligible players so the game
+        // loop never stalls waiting for them to type an intro message.
+        $humanGame = GameSetupService::initializeGame(1);
+        $humanGameLoop = new GameLoop($humanGame->id);
+
+        $eligible = $humanGameLoop->getEligiblePlayers($humanGame);
+
+        $humanPlayer = $humanGame->players()->where('is_human', true)->first();
+        $eligibleIds = array_map(fn ($p) => $p->id, $eligible);
+        $this->assertNotContains($humanPlayer->id, $eligibleIds, 'Human should not be in setup eligible players');
+
+        // AI players who haven't sent a public_chat message should also be eligible
+        $aiEligible = array_filter($eligible, fn ($p) => !$p->is_human);
+        $this->assertCount(4, $aiEligible, 'All 4 AI players should be eligible in setup');
+    }
+
+    public function test_eligible_players_in_team_voting_excludes_leader(): void
+    {
+        $this->game->update([
+            'current_phase' => 'team_voting',
+            'current_leader_id' => $this->players[0]->id,
+        ]);
+
+        $proposal = MissionProposal::create([
+            'game_id' => $this->game->id,
+            'mission_id' => $this->game->current_mission_id,
+            'proposed_by_id' => $this->players[0]->id,
+            'proposal_number' => 1,
+            'status' => 'pending',
+        ]);
+        $this->game->update(['current_proposal_id' => $proposal->id]);
+
+        $eligible = $this->gameLoop->getEligiblePlayers($this->game->fresh());
+
+        $this->assertCount(4, $eligible);
+        foreach ($eligible as $player) {
+            $this->assertNotEquals($this->players[0]->id, $player->id, 'Leader should not be eligible to vote');
+        }
+    }
+
+    public function test_eligible_players_in_mission_only_team_members(): void
+    {
+        $this->game->update([
+            'current_phase' => 'mission',
+            'current_leader_id' => $this->players[0]->id,
+        ]);
+
+        MissionTeamMember::create([
+            'mission_id' => $this->game->current_mission_id,
+            'player_id' => $this->players[1]->id,
+        ]);
+        MissionTeamMember::create([
+            'mission_id' => $this->game->current_mission_id,
+            'player_id' => $this->players[2]->id,
+        ]);
+
+        $eligible = $this->gameLoop->getEligiblePlayers($this->game->fresh());
+
+        $this->assertCount(2, $eligible);
+        $eligibleIds = array_map(fn ($p) => $p->id, $eligible);
+        $this->assertContains($this->players[1]->id, $eligibleIds);
+        $this->assertContains($this->players[2]->id, $eligibleIds);
+    }
+
+    public function test_eligible_players_in_mission_excludes_already_voted(): void
+    {
+        $this->game->update([
+            'current_phase' => 'mission',
+            'current_leader_id' => $this->players[0]->id,
+        ]);
+
+        MissionTeamMember::create([
+            'mission_id' => $this->game->current_mission_id,
+            'player_id' => $this->players[1]->id,
+            'vote_success' => true, // already voted
+        ]);
+        MissionTeamMember::create([
+            'mission_id' => $this->game->current_mission_id,
+            'player_id' => $this->players[2]->id,
+        ]);
+
+        $eligible = $this->gameLoop->getEligiblePlayers($this->game->fresh());
+
+        $this->assertCount(1, $eligible);
+        $this->assertEquals($this->players[2]->id, $eligible[0]->id);
+    }
+
+    public function test_eligible_players_in_assassination_only_assassin(): void
+    {
+        $this->game->update([
+            'current_phase' => 'assassination',
+            'current_leader_id' => $this->players[0]->id,
+        ]);
+
+        $eligible = $this->gameLoop->getEligiblePlayers($this->game->fresh());
+
+        $this->assertCount(1, $eligible);
+        $this->assertEquals('assassin', $eligible[0]->role);
+    }
+
+    public function test_process_player_vote_does_not_create_duplicate(): void
+    {
+        $this->game->update([
+            'current_phase' => 'team_voting',
+            'current_leader_id' => $this->players[0]->id,
+        ]);
+
+        $proposal = MissionProposal::create([
+            'game_id' => $this->game->id,
+            'mission_id' => $this->game->current_mission_id,
+            'proposed_by_id' => $this->players[0]->id,
+            'proposal_number' => 1,
+            'status' => 'pending',
+        ]);
+        $this->game->update(['current_proposal_id' => $proposal->id]);
+
+        // Vote once
+        $this->gameLoop->processPlayerVote($this->game->fresh(), $this->players[1], true);
+        $this->assertCount(1, MissionProposalVote::where('player_id', $this->players[1]->id)->get());
+
+        // Try to vote again
+        $this->gameLoop->processPlayerVote($this->game->fresh(), $this->players[1], false);
+        $this->assertCount(1, MissionProposalVote::where('player_id', $this->players[1]->id)->get());
+
+        // First vote is preserved
+        $vote = MissionProposalVote::where('player_id', $this->players[1]->id)->first();
+        $this->assertTrue($vote->approved);
+    }
+
+    public function test_five_rejected_proposals_causes_evil_win(): void
+    {
+        $this->game->update([
+            'current_phase' => 'team_voting',
+            'current_leader_id' => $this->players[0]->id,
+        ]);
+
+        $mission = $this->game->currentMission;
+
+        // Create 4 already-rejected proposals
+        for ($i = 1; $i <= 4; $i++) {
+            MissionProposal::create([
+                'game_id' => $this->game->id,
+                'mission_id' => $mission->id,
+                'proposed_by_id' => $this->players[0]->id,
+                'proposal_number' => $i,
+                'status' => 'rejected',
+            ]);
+        }
+
+        // Create the 5th pending proposal
+        $proposal = MissionProposal::create([
+            'game_id' => $this->game->id,
+            'mission_id' => $mission->id,
+            'proposed_by_id' => $this->players[0]->id,
+            'proposal_number' => 5,
+            'status' => 'pending',
+        ]);
+        $this->game->update(['current_proposal_id' => $proposal->id]);
+
+        // All non-leader players vote to reject
+        $eligiblePlayers = $this->gameLoop->getEligiblePlayers($this->game->fresh());
+        foreach ($eligiblePlayers as $player) {
+            $this->gameLoop->processPlayerVote($this->game->fresh(), $player, false);
+        }
+
+        $this->gameLoop->checkPhaseTransition($this->game->fresh());
+
+        $this->game->refresh();
+        $this->assertEquals('evil', $this->game->winner);
+        $this->assertEquals('finished', $this->game->current_phase);
+    }
+
+    public function test_end_game_creates_events_and_messages(): void
+    {
+        $this->gameLoop->endGame($this->game, 'good');
+
+        $this->game->refresh();
+        $this->assertEquals('good', $this->game->winner);
+        $this->assertEquals('finished', $this->game->current_phase);
+        $this->assertNotNull($this->game->ended_at);
+
+        // Should have game_end event
+        $this->assertDatabaseHas('game_events', [
+            'game_id' => $this->game->id,
+            'event_type' => 'game_end',
+        ]);
+
+        // Each player should have an end game message
+        foreach ($this->players as $player) {
+            $endMessage = Message::where('game_id', $this->game->id)
+                ->where('player_id', $player->id)
+                ->where('message_type', 'game_event')
+                ->where('content', 'like', '%The game has ended%')
+                ->first();
+
+            $this->assertNotNull($endMessage, "Player {$player->name} should have end game message");
+        }
+    }
+
+    /** Regression: game loop must not double-transition when human API call transitions first */
+    public function test_no_double_transition_when_human_votes_concurrently(): void
+    {
+        // Set up: game in team_voting with a proposal
+        $this->game->update(['current_phase' => 'team_voting']);
+        $mission = $this->game->currentMission;
+        $leader = $this->players[0];
+        $this->game->update(['current_leader_id' => $leader->id]);
+
+        $proposal = MissionProposal::create([
+            'game_id' => $this->game->id,
+            'mission_id' => $mission->id,
+            'proposed_by_id' => $leader->id,
+            'proposal_number' => 1,
+            'status' => 'pending',
+        ]);
+        // Add 2 team members to the proposal
+        foreach ([$this->players[0], $this->players[1]] as $p) {
+            MissionProposalMember::create(['proposal_id' => $proposal->id, 'player_id' => $p->id]);
+        }
+        $this->game->update(['current_proposal_id' => $proposal->id]);
+
+        // Simulate: human (and 3 AI) all vote approve — so all 4 non-leader votes are in
+        $nonLeaders = array_filter($this->players, fn ($p) => $p->id !== $leader->id);
+        foreach ($nonLeaders as $p) {
+            MissionProposalVote::create(['proposal_id' => $proposal->id, 'player_id' => $p->id, 'approved' => true]);
+        }
+
+        // Simulate API already calling transitionToNextPhase (as if human voted last via API)
+        // This sets phase to mission and creates MissionTeamMember records
+        $this->gameLoop->checkPhaseTransition($this->game->fresh());
+
+        $this->assertEquals('mission', $this->game->fresh()->current_phase);
+        $this->assertEquals(2, MissionTeamMember::where('mission_id', $mission->id)->count());
+
+        // Now the queue job's stale $game (still sees 'team_voting') calls checkPhaseTransition again
+        // It should NOT try to transition again (no double-transition, no constraint violation)
+        $this->game->current_phase = 'team_voting'; // simulate stale state in memory
+        // The fix: fresh() before checkPhaseTransition means it sees 'mission' and skips
+        $freshGame = $this->game->fresh();
+        $this->gameLoop->checkPhaseTransition($freshGame);
+
+        // Verify no duplicate MissionTeamMember records were created
+        $this->assertEquals(2, MissionTeamMember::where('mission_id', $mission->id)->count());
     }
 }

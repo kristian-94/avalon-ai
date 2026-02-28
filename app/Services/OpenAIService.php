@@ -10,7 +10,7 @@ class OpenAIService implements AgentService
 {
     private string $apiKey;
 
-    private string $model = 'gpt-3.5-turbo-1106';
+    private string $model = 'gpt-4o-mini';
 
     private string $baseUrl = 'https://api.openai.com/v1/chat/completions';
 
@@ -129,7 +129,7 @@ class OpenAIService implements AgentService
             ],
         ];
         
-        $required = ['message', 'reasoning'];
+        $required = ['reasoning'];
         
         // Add phase-specific properties
         switch ($phase) {

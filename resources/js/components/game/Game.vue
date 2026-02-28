@@ -9,17 +9,26 @@
 
   <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     <GameStateComponent :game-state="gameState" :players="players" :game="game"/>
-    <ChatInterface :player-id="playerId" :messages="messages" @send-message="sendMessage"/>
+    <GameHistory :events="events"/>
+    <ChatInterface
+        :player-id="playerId"
+        :messages="messages"
+        :game-state="gameState"
+        :players="players"
+        :game-id="gameId"
+        @send-message="sendMessage"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import {ref, onMounted, onUnmounted} from 'vue'
+import {ref, onMounted, onUnmounted, onBeforeUnmount} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
 import axios from 'axios'
 import ChatInterface from "../chat/ChatInterface.vue"
 import GameStateComponent from "./GameState.vue"
-import type {Message, Player, Game, GameState} from "../../types/game";
+import GameHistory from "./GameHistory.vue"
+import type {Message, Player, Game, GameState, GameEvent} from "../../types/game";
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +41,8 @@ const messages = ref<Message[]>([])
 const players = ref<Player[]>([])
 const gameState = ref<GameState | null>(null)
 const game = ref<Game | null>(null)
+const events = ref<GameEvent[]>([])
+let pollInterval: ReturnType<typeof setInterval> | null = null
 
 const initializeGame = async () => {
   try {
@@ -50,6 +61,7 @@ const initializeGame = async () => {
     players.value = gamePlayers
     gameState.value = gameData.game_state
     game.value = gameData
+    events.value = response.data.events || []
 
     // If we don't have a valid player ID and this is a game with a human player,
     // try to find the human player or redirect
@@ -68,6 +80,11 @@ const initializeGame = async () => {
 
     // Initialize WebSocket connection
     initializeWebSocket()
+
+    // Polling fallback: refresh state every 250ms while game is active
+    if (!gameData.ended_at) {
+      pollInterval = setInterval(pollGameState, 250)
+    }
   } catch (err) {
     console.error('Failed to fetch game state:', err)
     error.value = 'Failed to load game'
@@ -75,6 +92,23 @@ const initializeGame = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const pollGameState = async () => {
+  try {
+    const response = await axios.get(`/api/game/${gameId.value}/state`)
+    const {game: gameData, players: gamePlayers} = response.data
+    if (!gameData) return
+    gameState.value = gameData.game_state
+    players.value = gamePlayers
+    game.value = gameData
+    events.value = response.data.events || []
+    // Stop polling when game ends
+    if (gameData.ended_at && pollInterval) {
+      clearInterval(pollInterval)
+      pollInterval = null
+    }
+  } catch { /* ignore poll errors */ }
 }
 
 const initializeWebSocket = () => {
@@ -101,6 +135,7 @@ const initializeWebSocket = () => {
         players.value = event.eventData.players
       }
       game.value = event.eventData.game
+      events.value = event.eventData.events || []
     }
   })
 }
@@ -135,6 +170,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (pollInterval) clearInterval(pollInterval)
   if (gameId.value) {
     window.Echo.leave(`game.${gameId.value}`)
   }

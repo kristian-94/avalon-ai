@@ -187,6 +187,12 @@ class Game extends Model
                         'isSystem' => $message->player_id === null,
                     ];
                 })->toArray()),
+            'events' => $game->gameEvents->map(fn ($e) => [
+                'id' => $e->id,
+                'event_type' => $e->event_type,
+                'event_data' => $e->event_data,
+                'created_at' => $e->created_at,
+            ])->values()->toArray(),
             'players' => $game->players->map(function ($player) use ($game) {
                 $game->fresh();
                 // Include role if the game is finished

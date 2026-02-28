@@ -6,7 +6,11 @@ use App\Events\GameStateUpdate;
 use App\Events\NewMessage;
 use App\Jobs\GameLoop;
 use App\Models\Game;
+use App\Models\GameEvent;
 use App\Models\Message;
+use App\Models\MissionProposal;
+use App\Models\MissionProposalMember;
+use App\Models\MissionTeamMember;
 use App\Models\Player;
 use App\Services\GameSetupService;
 use App\Services\OpenAIService;
@@ -35,7 +39,8 @@ class GameController extends Controller
         }
 
         // Start the game loop
-        GameLoop::dispatch($game->id)->delay(now()->addSeconds(2));
+        $initialDelay = (int) env('AI_THINKING_TIME_MIN', 2);
+        GameLoop::dispatch($game->id)->delay(now()->addSeconds($initialDelay));
 
         return response()->json([
             'message' => 'Welcome to Avalon! The game will begin shortly.',
@@ -153,6 +158,7 @@ class GameController extends Controller
                 'currentMission.teamMembers.player',
                 'currentProposal.teamMembers.player',
                 'currentProposal.votes.player',
+                'gameEvents',
                 'missions' => function ($query) {
                     $query->orderBy('mission_number', 'asc')
                         ->with([
@@ -171,5 +177,133 @@ class GameController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    public function vote(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'gameId' => 'required|integer',
+            'playerId' => 'required|integer',
+            'approved' => 'required|boolean',
+        ]);
+
+        $game = Game::with(['players', 'currentMission', 'currentProposal.votes'])->findOrFail($validated['gameId']);
+        $player = Player::findOrFail($validated['playerId']);
+
+        if ($game->current_phase !== 'team_voting') {
+            return response()->json(['error' => 'Not in team_voting phase'], 422);
+        }
+
+        if ($game->current_leader_id === $player->id) {
+            return response()->json(['error' => 'Leader cannot vote'], 422);
+        }
+
+        $alreadyVoted = $game->currentProposal->votes->where('player_id', $player->id)->isNotEmpty();
+        if ($alreadyVoted) {
+            return response()->json(['error' => 'Player has already voted'], 422);
+        }
+
+        $gameLoop = new GameLoop($game->id);
+        $gameLoop->processPlayerVote($game, $player, $validated['approved']);
+
+        broadcast(new GameStateUpdate($game->fresh()));
+
+        return response()->json(['result' => 'Vote recorded']);
+    }
+
+    public function propose(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'gameId' => 'required|integer',
+            'playerId' => 'required|integer',
+            'playerIds' => 'required|array',
+            'playerIds.*' => 'integer',
+        ]);
+
+        $game = Game::with(['players', 'currentMission.proposals'])->findOrFail($validated['gameId']);
+        $player = Player::findOrFail($validated['playerId']);
+
+        if ($game->current_phase !== 'team_proposal') {
+            return response()->json(['error' => 'Not in team_proposal phase'], 422);
+        }
+
+        if ($game->current_leader_id !== $player->id) {
+            return response()->json(['error' => 'Player is not the current leader'], 422);
+        }
+
+        if ($game->current_proposal_id !== null) {
+            return response()->json(['error' => 'A proposal already exists'], 422);
+        }
+
+        if (count($validated['playerIds']) !== $game->currentMission->required_players) {
+            return response()->json(['error' => 'Wrong number of players for this mission'], 422);
+        }
+
+        $proposalNumber = ($game->currentMission->proposals()->max('proposal_number') ?? 0) + 1;
+
+        $proposal = MissionProposal::create([
+            'game_id' => $game->id,
+            'mission_id' => $game->currentMission->id,
+            'proposed_by_id' => $player->id,
+            'proposal_number' => $proposalNumber,
+            'status' => 'pending',
+        ]);
+
+        $proposedPlayers = collect();
+        foreach ($validated['playerIds'] as $playerId) {
+            MissionProposalMember::create([
+                'proposal_id' => $proposal->id,
+                'player_id' => $playerId,
+            ]);
+            $proposedPlayers->push($game->players->firstWhere('id', $playerId));
+        }
+
+        $game->current_proposal_id = $proposal->id;
+        $game->save();
+
+        GameEvent::create([
+            'game_id' => $game->id,
+            'event_type' => 'team_proposal',
+            'event_data' => [
+                'proposed_by' => $player->name,
+                'team' => $proposedPlayers->pluck('name')->values()->toArray(),
+                'proposal_number' => $proposalNumber,
+            ],
+        ]);
+
+        broadcast(new GameStateUpdate($game->fresh()));
+
+        return response()->json(['result' => 'Proposal submitted']);
+    }
+
+    public function missionAction(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'gameId' => 'required|integer',
+            'playerId' => 'required|integer',
+            'success' => 'required|boolean',
+        ]);
+
+        $game = Game::with(['currentMission.teamMembers'])->findOrFail($validated['gameId']);
+        $player = Player::findOrFail($validated['playerId']);
+
+        if ($game->current_phase !== 'mission') {
+            return response()->json(['error' => 'Not in mission phase'], 422);
+        }
+
+        $teamMember = $game->currentMission->teamMembers->where('player_id', $player->id)->first();
+        if (!$teamMember) {
+            return response()->json(['error' => 'Player is not on the mission team'], 422);
+        }
+
+        if ($teamMember->vote_success !== null) {
+            return response()->json(['error' => 'Player has already submitted a mission action'], 422);
+        }
+
+        $teamMember->update(['vote_success' => $validated['success']]);
+
+        broadcast(new GameStateUpdate($game->fresh()));
+
+        return response()->json(['result' => 'Mission action recorded']);
     }
 }

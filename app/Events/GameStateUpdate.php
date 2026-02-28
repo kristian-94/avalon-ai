@@ -25,6 +25,7 @@ class GameStateUpdate implements ShouldBroadcast
             'currentProposal.votes',
             'missions.teamMembers',
             'missions.proposals',
+            'gameEvents',
         ]);
     }
 

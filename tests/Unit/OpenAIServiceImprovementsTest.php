@@ -65,8 +65,8 @@ class OpenAIServiceImprovementsTest extends TestCase
         $this->assertArrayHasKey('reasoning', $params['properties']);
         $this->assertArrayHasKey('team_proposal', $params['properties']);
         
-        // Team proposal should not be required
-        $this->assertContains('message', $params['required']);
+        // Team proposal should not be required; message is also not required
+        $this->assertNotContains('message', $params['required']);
         $this->assertContains('reasoning', $params['required']);
         $this->assertNotContains('team_proposal', $params['required']);
         

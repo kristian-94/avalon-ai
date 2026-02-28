@@ -6,6 +6,7 @@
         <p class="text-white/80 text-lg mb-8">
           Join a game of Avalon with AI agents, or watch them play against each other.
         </p>
+        <div v-if="errorMessage" class="text-red-400 text-sm mb-4">{{ errorMessage }}</div>
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
           <button
               @click="startGame('play')"
@@ -38,22 +39,25 @@ import {useRouter} from 'vue-router'
 import axios from "axios";
 
 const gameState = ref<'initializing' | null>(null)
+const errorMessage = ref<string | null>(null)
 const router = useRouter()
 
 const startGame = async (mode: 'play' | 'watch') => {
   gameState.value = 'initializing'
+  errorMessage.value = null
 
-  const response = await axios.post('/api/game/initialize', {
-    mode: mode
-  });
+  try {
+    const response = await axios.post('/api/game/initialize', { mode })
+    const {gameId, playerId, message} = response.data
 
-  const {gameId, playerId, message} = response.data
+    localStorage.setItem('playerId', playerId);
+    localStorage.setItem('gameId', gameId);
+    localStorage.setItem('initialMessage', message);
 
-  localStorage.setItem('playerId', playerId);
-  localStorage.setItem('gameId', gameId);
-  localStorage.setItem('initialMessage', message);
-
-  // Navigate to the game route
-  await router.push(`/game/${gameId}`)
+    await router.push(`/game/${gameId}`)
+  } catch (err: any) {
+    gameState.value = null
+    errorMessage.value = err?.response?.data?.message ?? 'Failed to start game. Please try again.'
+  }
 }
 </script>
