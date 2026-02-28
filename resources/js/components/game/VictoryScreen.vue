@@ -1,5 +1,12 @@
 <template>
   <div class="space-y-6 text-center p-6 bg-black/40 backdrop-blur-sm rounded-lg">
+    <!-- New Game Button -->
+    <div>
+      <button @click="$emit('newGame')" class="px-6 py-2 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-lg border border-white/20 transition-all duration-200">
+        New Game
+      </button>
+    </div>
+
     <!-- Victory Banner -->
     <div :class="[
       'text-4xl font-bold',
@@ -63,6 +70,8 @@ const props = defineProps<{
   players: Player[]
   game: Game
 }>()
+
+defineEmits<{ newGame: [] }>()
 
 const completedMissions = computed(() =>
     props.gameState.missions.filter(m => m.status !== 'pending')

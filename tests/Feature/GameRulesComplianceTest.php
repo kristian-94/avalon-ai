@@ -102,8 +102,8 @@ class GameRulesComplianceTest extends TestCase
             $isEvilPlayer = false;
             foreach ($messages as $message) {
                 if ($message['role'] === 'system' && 
-                    (str_contains($message['content'], 'You are the Assassin') || 
-                     str_contains($message['content'], 'You are a Minion'))) {
+                    (str_contains($message['content'], 'Your role is the Assassin') ||
+                     str_contains($message['content'], 'Your role is Minion'))) {
                     $isEvilPlayer = true;
                     break;
                 }
@@ -234,7 +234,7 @@ class GameRulesComplianceTest extends TestCase
         $gameLoop->checkPhaseTransition($game->fresh());
 
         $game->refresh();
-        $this->assertEquals('finished', $game->current_phase);
+        $this->assertEquals('debrief', $game->current_phase);
         $this->assertEquals('evil', $game->winner);
     }
 
@@ -322,7 +322,7 @@ class GameRulesComplianceTest extends TestCase
         $gameLoop->checkPhaseTransition($game->fresh());
 
         $game->refresh();
-        $this->assertEquals('finished', $game->current_phase);
+        $this->assertEquals('debrief', $game->current_phase);
         $this->assertEquals('evil', $game->winner);
     }
 

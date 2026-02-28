@@ -497,7 +497,7 @@ class GameLoopTest extends TestCase
         // Verify game state
         $this->game->refresh();
         $this->assertEquals('evil', $this->game->winner);
-        $this->assertEquals('finished', $this->game->current_phase);
+        $this->assertEquals('debrief', $this->game->current_phase);
 
         $assassination_event = $this->game->gameEvents()->where('event_type', 'assassination')->first();
         $assassin_target = $assassination_event->event_data['assassin_target']['player_id'];
@@ -573,7 +573,7 @@ class GameLoopTest extends TestCase
         // Verify game state
         $this->game->refresh();
         $this->assertEquals('good', $this->game->winner);
-        $this->assertEquals('finished', $this->game->current_phase);
+        $this->assertEquals('debrief', $this->game->current_phase);
 
         // Verify end game messages - need to use fresh player data after role swaps
         $freshPlayers = Player::where('game_id', $this->game->id)->get();
@@ -1133,7 +1133,7 @@ class GameLoopTest extends TestCase
 
         $this->game->refresh();
         $this->assertEquals('evil', $this->game->winner);
-        $this->assertEquals('finished', $this->game->current_phase);
+        $this->assertEquals('debrief', $this->game->current_phase);
     }
 
     public function test_end_game_creates_events_and_messages(): void
@@ -1142,8 +1142,8 @@ class GameLoopTest extends TestCase
 
         $this->game->refresh();
         $this->assertEquals('good', $this->game->winner);
-        $this->assertEquals('finished', $this->game->current_phase);
-        $this->assertNotNull($this->game->ended_at);
+        $this->assertEquals('debrief', $this->game->current_phase);
+        $this->assertNull($this->game->ended_at); // ended_at is set later by concludeGame
 
         // Should have game_end event
         $this->assertDatabaseHas('game_events', [

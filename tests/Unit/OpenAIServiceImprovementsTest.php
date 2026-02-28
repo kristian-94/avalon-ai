@@ -193,12 +193,12 @@ class OpenAIServiceImprovementsTest extends TestCase
         foreach ($phases as $phase) {
             $params = $this->invokeMethod($this->service, 'getPhaseSpecificParameters', [$phase]);
             
-            // Message should always mention being concise and relevant
-            $this->assertStringContainsString('concise and relevant to the current phase', 
+            // Message should always provide in-character dialogue guidance
+            $this->assertStringContainsString('in-character',
                 $params['properties']['message']['description']);
-            
+
             // Reasoning should be about private thoughts
-            $this->assertStringContainsString('Private reasoning', 
+            $this->assertStringContainsString('Private',
                 $params['properties']['reasoning']['description']);
         }
     }

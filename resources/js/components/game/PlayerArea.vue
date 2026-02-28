@@ -55,8 +55,8 @@
         <div class="text-white/50 text-xs">
           {{ player.is_human ? '🧑 Human' : '🤖 AI Agent' }}
         </div>
-        <!-- Role revealed at game end -->
-        <div v-if="isGameFinished" :class="[
+        <!-- Role revealed at game end, or always for the human player -->
+        <div v-if="player.roleLabel && (isGameFinished || player.is_human)" :class="[
           'text-xs font-medium px-1.5 py-0.5 rounded',
           player.role?.includes('minion') || player.role?.includes('assassin')
             ? 'bg-red-900/40 text-red-300'

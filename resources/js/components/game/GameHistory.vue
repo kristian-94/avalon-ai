@@ -19,7 +19,7 @@
             </template>
             <template v-else-if="event.event_type === 'mission_complete'">
               <div v-for="v in event.event_data.breakdown" :key="v.player" class="flex items-center gap-2 text-xs">
-                <span v-if="props.rolesRevealed" :class="v.success ? 'text-green-400' : 'text-red-400'">{{ v.success ? '✓' : '✗' }}</span>
+                <span v-if="props.rolesRevealed || event.event_data.success" :class="v.success ? 'text-green-400' : 'text-red-400'">{{ v.success ? '✓' : '✗' }}</span>
                 <span v-else class="text-white/30">?</span>
                 <span class="text-white/80">{{ v.player }}</span>
               </div>
@@ -80,10 +80,7 @@ const eventClass = (event: GameEvent): string => {
 const hasBreakdown = (event: GameEvent): boolean => {
   const b = event.event_data?.breakdown
   if (!b || b.length === 0) return false
-  if (event.event_type === 'team_vote') {
-    // Only show tooltip if not unanimous
-    return b.some((v: any) => v.approved) && b.some((v: any) => !v.approved)
-  }
+  if (event.event_type === 'team_vote') return true
   if (event.event_type === 'mission_complete') return true
   return false
 }

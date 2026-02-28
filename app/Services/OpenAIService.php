@@ -10,7 +10,7 @@ class OpenAIService implements AgentService
 {
     private string $apiKey;
 
-    private string $model = 'gpt-4o-mini';
+    private string $model = 'gpt-4.1-mini';
 
     private string $baseUrl = 'https://api.openai.com/v1/chat/completions';
 

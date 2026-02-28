@@ -265,7 +265,7 @@ class TeamVotingMechanicsTest extends TestCase
 
         $game->refresh();
 
-        $this->assertEquals('finished', $game->current_phase);
+        $this->assertEquals('debrief', $game->current_phase);
         $this->assertEquals('evil', $game->winner);
     }
 

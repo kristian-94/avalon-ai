@@ -201,12 +201,12 @@ class Game extends Model
             ],
             'players' => $game->players->map(function ($player) use ($game) {
                 $game->fresh();
-                // Include role if the game is finished
-                $role = in_array($game->current_phase, ['finished', 'debrief']) ? $player->role : null;
+                // Always include role for the human player, or at game end for all players
+                $role = ($player->is_human || in_array($game->current_phase, ['finished', 'debrief'])) ? $player->role : null;
                 // Otherwise include the role for evil players during final assassination phase
-                if ($game->current_phase === 'assassination' && $player->role === 'assassin') {
+                if (!$role && $game->current_phase === 'assassination' && $player->role === 'assassin') {
                     $role = 'assassin';
-                } elseif ($game->current_phase === 'assassination' && $player->role === 'minion') {
+                } elseif (!$role && $game->current_phase === 'assassination' && $player->role === 'minion') {
                     $role = 'minion';
                 }
                 $roleLabel = $role ? ($role === 'loyal_servant' ? 'Loyal Servant' : ucfirst($role)) : null;
