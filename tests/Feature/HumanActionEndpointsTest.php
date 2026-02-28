@@ -625,4 +625,109 @@ class HumanActionEndpointsTest extends TestCase
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['mode']);
     }
+
+    // ──────────────────────────────────────────────────
+    // Assassination endpoint tests
+    // ──────────────────────────────────────────────────
+
+    public function test_assassin_can_assassinate_target(): void
+    {
+        $assassin = $this->players->first();
+        $assassin->update(['role' => 'assassin']);
+        $target = $this->players->where('id', '!=', $assassin->id)->first();
+        $target->update(['role' => 'loyal_servant']);
+
+        $this->game->update(['current_phase' => 'assassination']);
+
+        $response = $this->postJson('/api/game/assassinate', [
+            'gameId' => $this->game->id,
+            'playerId' => $assassin->id,
+            'targetPlayerId' => $target->id,
+        ]);
+
+        $response->assertOk();
+        $response->assertJson(['result' => 'Assassination recorded']);
+
+        $this->assertDatabaseHas('game_events', [
+            'game_id' => $this->game->id,
+            'event_type' => 'assassination',
+        ]);
+
+        Event::assertDispatched(GameStateUpdate::class);
+    }
+
+    public function test_assassination_rejects_when_not_in_assassination_phase(): void
+    {
+        $assassin = $this->players->first();
+        $assassin->update(['role' => 'assassin']);
+        $target = $this->players->where('id', '!=', $assassin->id)->first();
+
+        $this->game->update(['current_phase' => 'mission']);
+
+        $response = $this->postJson('/api/game/assassinate', [
+            'gameId' => $this->game->id,
+            'playerId' => $assassin->id,
+            'targetPlayerId' => $target->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['error' => 'Not in assassination phase']);
+    }
+
+    public function test_non_assassin_cannot_assassinate(): void
+    {
+        $nonAssassin = $this->players->first();
+        $nonAssassin->update(['role' => 'loyal_servant']);
+        $target = $this->players->where('id', '!=', $nonAssassin->id)->first();
+
+        $this->game->update(['current_phase' => 'assassination']);
+
+        $response = $this->postJson('/api/game/assassinate', [
+            'gameId' => $this->game->id,
+            'playerId' => $nonAssassin->id,
+            'targetPlayerId' => $target->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['error' => 'Player is not the assassin']);
+    }
+
+    public function test_cannot_assassinate_twice(): void
+    {
+        $assassin = $this->players->first();
+        $assassin->update(['role' => 'assassin']);
+        $target = $this->players->where('id', '!=', $assassin->id)->first();
+        $target->update(['role' => 'merlin']);
+
+        $this->game->update(['current_phase' => 'assassination']);
+
+        \App\Models\GameEvent::create([
+            'game_id' => $this->game->id,
+            'event_type' => 'assassination',
+            'event_data' => [
+                'assassin_target' => [
+                    'player_name' => $target->name,
+                    'player_id' => $target->id,
+                    'player_role' => $target->role,
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson('/api/game/assassinate', [
+            'gameId' => $this->game->id,
+            'playerId' => $assassin->id,
+            'targetPlayerId' => $target->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['error' => 'Assassination already performed']);
+    }
+
+    public function test_assassination_validates_required_fields(): void
+    {
+        $response = $this->postJson('/api/game/assassinate', []);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['gameId', 'playerId', 'targetPlayerId']);
+    }
 }

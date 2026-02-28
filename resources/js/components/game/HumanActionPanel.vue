@@ -75,14 +75,56 @@
       >Propose Team ({{ selectedIds.length }}/{{ requiredCount }})</button>
     </div>
 
+    <!-- Assassination UI -->
+    <div v-else-if="showAssassination" class="space-y-2">
+      <div class="text-white/70 text-sm mb-2">
+        Choose who you think is Merlin to assassinate
+        <span class="text-white/40 text-xs ml-1">(← → navigate · Enter confirm)</span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button
+            v-for="(player, index) in assassinationTargets"
+            :key="player.id"
+            @click="submitAssassination(player.id)"
+            :class="[
+              'px-3 py-1 rounded-full text-sm transition-colors',
+              focusedAssassinIndex === index && isFocused
+                ? 'ring-2 ring-red-400 bg-red-600/60 text-white'
+                : 'bg-red-900/40 text-red-300 hover:bg-red-600/40',
+            ]"
+        >{{ player.name }}</button>
+      </div>
+    </div>
+
     <!-- Mission UI -->
     <div v-else-if="showMission" class="space-y-2">
       <div class="text-white/70 text-sm mb-2">
         You are on this mission
-        <span class="text-white/40 text-xs ml-1">(Enter to play)</span>
+        <span class="text-white/40 text-xs ml-1">(Enter to play{{ isEvilPlayer ? ' · ← Success · Fail →' : '' }})</span>
+      </div>
+      <div v-if="isEvilPlayer" class="flex gap-2">
+        <button
+            @click="submitMissionAction(true)"
+            :class="[
+              'flex-1 px-4 py-2 rounded-lg transition-colors',
+              focusedMission === true && isFocused
+                ? 'bg-green-500/70 text-white ring-2 ring-green-400'
+                : 'bg-green-600/40 text-green-300 hover:bg-green-600/60',
+            ]"
+        >Play Success</button>
+        <button
+            @click="submitMissionAction(false)"
+            :class="[
+              'flex-1 px-4 py-2 rounded-lg transition-colors',
+              focusedMission === false && isFocused
+                ? 'bg-red-500/70 text-white ring-2 ring-red-400'
+                : 'bg-red-600/40 text-red-300 hover:bg-red-600/60',
+            ]"
+        >Play Fail</button>
       </div>
       <button
-          @click="submitMissionAction"
+          v-else
+          @click="submitMissionAction(true)"
           class="w-full bg-green-600/40 text-green-300 px-4 py-2 rounded-lg hover:bg-green-600/60"
       >Play Success</button>
     </div>
@@ -111,11 +153,19 @@ const missionSubmitted = ref(false)
 const submittedMessage = ref('')
 const isFocused = ref(false)
 const focusedVote = ref<boolean | null>(true)    // default highlight: Approve
+const focusedMission = ref<boolean>(true)        // default highlight: Success
 const focusedPlayerIndex = ref(0)
+const focusedAssassinIndex = ref(0)
+const assassinationSubmitted = ref(false)
 
 const humanPlayerIndex = computed(() =>
     props.players.find(p => p.id === props.playerId)?.player_index
 )
+
+const isEvilPlayer = computed(() => {
+  const role = props.players.find(p => p.id === props.playerId)?.role
+  return role === 'assassin' || role === 'minion'
+})
 
 // Reset missionSubmitted when a new mission starts
 watch(() => props.gameState?.currentMission?.id, () => { missionSubmitted.value = false })
@@ -133,6 +183,16 @@ const showProposal = computed(() => {
   return !props.gameState?.currentProposal
 })
 
+const showAssassination = computed(() => {
+  if (props.gameState?.currentPhase !== 'assassination') return false
+  const role = props.players.find(p => p.id === props.playerId)?.role
+  return role === 'assassin' && !assassinationSubmitted.value
+})
+
+const assassinationTargets = computed(() =>
+  props.players.filter(p => p.role !== 'assassin' && p.role !== 'minion')
+)
+
 const showMission = computed(() => {
   if (props.gameState?.currentPhase !== 'mission') return false
   if (humanPlayerIndex.value === undefined) return false
@@ -141,7 +201,7 @@ const showMission = computed(() => {
 })
 
 const showPanel = computed(() =>
-    !!submittedMessage.value || showVoting.value || showProposal.value || showMission.value
+    !!submittedMessage.value || showVoting.value || showProposal.value || showMission.value || showAssassination.value
 )
 
 const requiredCount = computed(() => props.gameState?.currentMission?.required || 0)
@@ -169,8 +229,19 @@ const handleKeydown = (e: KeyboardEvent) => {
       e.preventDefault()
     }
 
+  } else if (showAssassination.value) {
+    if (e.key === 'ArrowRight') { focusedAssassinIndex.value = (focusedAssassinIndex.value + 1) % assassinationTargets.value.length; e.preventDefault() }
+    else if (e.key === 'ArrowLeft') { focusedAssassinIndex.value = (focusedAssassinIndex.value - 1 + assassinationTargets.value.length) % assassinationTargets.value.length; e.preventDefault() }
+    else if (e.key === 'Enter') { submitAssassination(assassinationTargets.value[focusedAssassinIndex.value]?.id); e.preventDefault() }
+
   } else if (showMission.value) {
-    if (e.key === 'Enter') { submitMissionAction(); e.preventDefault() }
+    if (isEvilPlayer.value) {
+      if (e.key === 'ArrowRight') { focusedMission.value = false; e.preventDefault() }
+      else if (e.key === 'ArrowLeft') { focusedMission.value = true; e.preventDefault() }
+      else if (e.key === 'Enter') { submitMissionAction(focusedMission.value); e.preventDefault() }
+    } else {
+      if (e.key === 'Enter') { submitMissionAction(true); e.preventDefault() }
+    }
   }
 
   if (e.key === 'Escape' || e.key === 'ArrowUp') { emit('return-focus'); e.preventDefault() }
@@ -213,9 +284,20 @@ const submitProposal = async () => {
   }
 }
 
-const submitMissionAction = async () => {
+const submitAssassination = async (targetPlayerId: number) => {
+  if (!targetPlayerId) return
   try {
-    await axios.post('/api/game/mission-action', { gameId: props.gameId, playerId: props.playerId, success: true })
+    await axios.post('/api/game/assassinate', { gameId: props.gameId, playerId: props.playerId, targetPlayerId })
+    assassinationSubmitted.value = true
+    showConfirmation('🗡️ Assassination target chosen')
+  } catch (err) {
+    console.error('Failed to submit assassination:', err)
+  }
+}
+
+const submitMissionAction = async (success: boolean) => {
+  try {
+    await axios.post('/api/game/mission-action', { gameId: props.gameId, playerId: props.playerId, success })
     missionSubmitted.value = true
     showConfirmation('✓ Mission card played')
   } catch (err) {

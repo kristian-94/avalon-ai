@@ -276,6 +276,47 @@ class GameController extends Controller
         return response()->json(['result' => 'Proposal submitted']);
     }
 
+    public function assassinate(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'gameId' => 'required|integer',
+            'playerId' => 'required|integer',
+            'targetPlayerId' => 'required|integer',
+        ]);
+
+        $game = Game::findOrFail($validated['gameId']);
+        $player = Player::findOrFail($validated['playerId']);
+        $target = Player::findOrFail($validated['targetPlayerId']);
+
+        if ($game->current_phase !== 'assassination') {
+            return response()->json(['error' => 'Not in assassination phase'], 422);
+        }
+
+        if ($player->role !== 'assassin') {
+            return response()->json(['error' => 'Player is not the assassin'], 422);
+        }
+
+        if ($game->gameEvents()->where('event_type', 'assassination')->exists()) {
+            return response()->json(['error' => 'Assassination already performed'], 422);
+        }
+
+        GameEvent::create([
+            'game_id' => $game->id,
+            'event_type' => 'assassination',
+            'event_data' => [
+                'assassin_target' => [
+                    'player_name' => $target->name,
+                    'player_id' => $target->id,
+                    'player_role' => $target->role,
+                ],
+            ],
+        ]);
+
+        broadcast(new GameStateUpdate($game->fresh()));
+
+        return response()->json(['result' => 'Assassination recorded']);
+    }
+
     public function missionAction(Request $request): JsonResponse
     {
         $validated = $request->validate([
