@@ -1,5 +1,26 @@
 import { test, expect, Page } from '@playwright/test'
 
+// Pricing per million tokens: [input, output]
+const MODEL_PRICING: Record<string, [number, number]> = {
+    'gpt-4o':                   [2.50,  10.00],
+    'gpt-4o-mini':              [0.15,   0.60],
+    'gpt-4.1':                  [2.00,   8.00],
+    'gpt-4.1-mini':             [0.40,   1.60],
+    'gpt-4.1-nano':             [0.10,   0.40],
+    'llama-3.3-70b-versatile':  [0.59,   0.79],
+    'openai/gpt-oss-120b':      [0.15,   0.60],
+    'llama-3.1-8b-instant':     [0.05,   0.08],
+    'llama3-70b-8192':          [0.59,   0.79],
+    'mixtral-8x7b-32768':       [0.24,   0.24],
+}
+
+function estimateCost(model: string | undefined, promptTokens: number, completionTokens: number): string {
+    const pricing = model ? MODEL_PRICING[model] : undefined
+    if (!pricing) return model ? `unknown model "${model}"` : 'unknown model'
+    const cost = (promptTokens / 1_000_000) * pricing[0] + (completionTokens / 1_000_000) * pricing[1]
+    return `$${cost.toFixed(4)}`
+}
+
 /**
  * Full game integration test — human plays through an entire Avalon game.
  *
@@ -148,8 +169,8 @@ async function playGame(page: Page, roleName: string) {
         const state = await page.request.get(`${BASE_URL}/api/game/${gameId}/state`).then(r => r.json()).catch(() => null)
         const usage = state?.apiUsage
         if (usage) {
-            const cost = (usage.promptTokens / 1_000_000) * 0.150 + (usage.completionTokens / 1_000_000) * 0.600
-            console.log(`[${roleName}] API calls: ${usage.calls} | tokens: ${usage.totalTokens} | est. cost: $${cost.toFixed(4)}`)
+            const cost = estimateCost(usage.model, usage.promptTokens, usage.completionTokens)
+            console.log(`[${roleName}] API calls: ${usage.calls} | tokens: ${usage.totalTokens} | model: ${usage.model ?? 'unknown'} | est. cost: ${cost}`)
         }
     }
 

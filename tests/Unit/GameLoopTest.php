@@ -465,7 +465,7 @@ class GameLoopTest extends TestCase
             }
 
             // Everyone should see the game end message with all roles.
-            $this->assertEquals($string.'The game has ended. The minions of Mordred have won. Max was merlin. Alex was an assassin. Sam was a loyal_servant. Jordan was a loyal_servant. Riley was a minion.', $lastMessage);
+            $this->assertEquals($string.'The game has ended. The minions of Mordred have won.'.$this->buildRoleRevealString(), $lastMessage);
         }
 
         Event::assertDispatched(GameStateUpdate::class);
@@ -473,18 +473,37 @@ class GameLoopTest extends TestCase
 
     public function test_evil_wins_when_assassin_correctly_identifies_merlin()
     {
-        // Set the game state to assassination phase
-        $this->game->update([
-            'current_phase' => 'assassination',
-            'current_leader_id' => $this->players[1]->id, // Assuming player 1 is assassin
-        ]);
-
         // Find Merlin and Assassin
         $merlin = $this->game->players()->firstWhere('role', 'merlin');
         $assassin = $this->game->players()->firstWhere('role', 'assassin');
 
+        // Reset HTTP stubs (Http::fake appends, so we need a fresh factory)
+        Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::fake([
+            'api.openai.com/*' => Http::response([
+                'choices' => [[
+                    'message' => [
+                        'function_call' => [
+                            'name' => 'game_response',
+                            'arguments' => json_encode([
+                                'message' => 'I think I know who Merlin is.',
+                                'reasoning' => 'Deduction',
+                                'assassination_target' => $merlin->name,
+                            ]),
+                        ],
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        // Set the game state to assassination phase
+        $this->game->update([
+            'current_phase' => 'assassination',
+            'current_leader_id' => $assassin->id,
+        ]);
+
         $eligiblePlayers = $this->gameLoop->getEligiblePlayers($this->game);
-        $this->assertCount(1, $eligiblePlayers); // Only the assassin is eligible to
+        $this->assertCount(1, $eligiblePlayers);
         foreach ($eligiblePlayers as $player) {
             if (! $player->is_human) {
                 $this->gameLoop->processAIPlayerTurn($this->game, $player);
@@ -515,7 +534,7 @@ class GameLoopTest extends TestCase
             }
 
             // Everyone should see the game end message with all roles.
-            $this->assertEquals($string.'The game has ended. The minions of Mordred have won. The Assassin was able to identify Merlin. Max was merlin. Alex was an assassin. Sam was a loyal_servant. Jordan was a loyal_servant. Riley was a minion.', $lastMessage, 'wrong message for role '.$player->role);
+            $this->assertEquals($string.'The game has ended. The minions of Mordred have won. The Assassin was able to identify Merlin.'.$this->buildRoleRevealString(), $lastMessage, 'wrong message for role '.$player->role);
         }
 
         Event::assertDispatched(GameStateUpdate::class);
@@ -712,7 +731,9 @@ class GameLoopTest extends TestCase
 
         // Set up fifth successful mission to trigger assassination phase
         $mission5 = $this->game->missions()->where('mission_number', 5)->first();
-        $oldLeaderId = $this->players[4]->id;
+        // Pick a non-assassin leader so we can assert the leader changes to the assassin
+        $nonAssassinPlayer = collect($this->players)->first(fn ($p) => $p->role !== 'assassin');
+        $oldLeaderId = $nonAssassinPlayer->id;
 
         $this->game->update([
             'current_phase' => 'mission',
@@ -1204,5 +1225,18 @@ class GameLoopTest extends TestCase
 
         // Verify no duplicate MissionTeamMember records were created
         $this->assertEquals(2, MissionTeamMember::where('mission_id', $mission->id)->count());
+    }
+
+    private function buildRoleRevealString(): string
+    {
+        return $this->game->fresh()->players->map(function ($player) {
+            $connectingWord = match (true) {
+                $player->role === 'merlin' => '',
+                str_starts_with($player->role, 'a') || str_starts_with($player->role, 'e') || str_starts_with($player->role, 'i') || str_starts_with($player->role, 'o') || str_starts_with($player->role, 'u') => ' an',
+                default => ' a'
+            };
+
+            return " {$player->name} was{$connectingWord} {$player->role}.";
+        })->join('');
     }
 }

@@ -53,7 +53,7 @@
           v-if="latestProposal?.votes && latestProposal.votes[player.player_index] !== undefined"
           class="relative group/tip mt-1"
       >
-        <span class="text-sm cursor-default">{{ latestProposal.votes[player.player_index] ? '👍' : '👎' }}</span>
+        <span class="text-sm font-bold cursor-default" :class="latestProposal.votes[player.player_index] ? 'text-green-400' : 'text-red-400'">{{ latestProposal.votes[player.player_index] ? '✓' : '✗' }}</span>
         <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-black/90 border border-white/20 text-white/80 text-xs rounded whitespace-nowrap invisible group-hover/tip:visible opacity-0 group-hover/tip:opacity-100 transition-opacity z-20 pointer-events-none">
           {{ latestProposal.votes[player.player_index] ? 'Voted to approve' : 'Voted to reject' }}
         </div>

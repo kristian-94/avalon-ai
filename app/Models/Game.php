@@ -198,6 +198,8 @@ class Game extends Model
                 'totalTokens' => $game->total_tokens,
                 'promptTokens' => $game->prompt_tokens,
                 'completionTokens' => $game->completion_tokens,
+                'provider' => env('AI_PROVIDER', 'openai'),
+                'model' => env('AI_MODEL', null),
             ],
             'players' => $game->players->map(function ($player) use ($game) {
                 $humanPlayer = $game->players->firstWhere('is_human', true);

@@ -6,53 +6,58 @@ use App\Contracts\AgentService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class OpenAIService implements AgentService
+class GroqService implements AgentService
 {
     private string $apiKey;
 
     private string $model;
 
-    private string $baseUrl = 'https://api.openai.com/v1/chat/completions';
+    private string $baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
 
     public function __construct()
     {
-        $this->apiKey = env('OPEN_AI_API_KEY');
-        $this->model = env('AI_MODEL', 'gpt-4.1-mini');
+        $this->apiKey = env('GROQ_API_KEY', '');
+        $this->model = env('AI_MODEL', 'llama-3.3-70b-versatile');
     }
 
     public function getChatResponse(array $messages): array
     {
         $messages = array_values($messages);
-        
-        // Extract current phase from messages to customize function parameters
+
         $currentPhase = $this->extractCurrentPhase($messages);
-        
+
         try {
             $response = Http::withToken($this->apiKey)
                 ->withHeaders([
                     'Content-Type' => 'application/json',
                 ])
-                ->post($this->baseUrl, [
+                ->post($this->baseUrl, array_filter([
                     'model' => $this->model,
                     'messages' => $messages,
-                    'response_format' => ['type' => 'json_object'],
-                    'functions' => [[
-                        'name' => 'game_response',
-                        'description' => 'Respond to the current game situation',
-                        'parameters' => $this->getPhaseSpecificParameters($currentPhase),
+                    'tools' => [[
+                        'type' => 'function',
+                        'function' => [
+                            'name' => 'game_response',
+                            'description' => 'Respond to the current game situation',
+                            'parameters' => $this->getPhaseSpecificParameters($currentPhase),
+                        ],
                     ]],
-                    'function_call' => ['name' => 'game_response'],
+                    'tool_choice' => [
+                        'type' => 'function',
+                        'function' => ['name' => 'game_response'],
+                    ],
+                    'reasoning_effort' => env('AI_REASONING_EFFORT') ?: null,
                     'temperature' => 0.7,
                     'max_tokens' => 300,
-                ]);
+                ]));
 
-            Log::info('OpenAI raw response', [
+            Log::info('Groq raw response', [
                 'status' => $response->status(),
                 'body' => $response->json(),
             ]);
 
             if (! $response->successful()) {
-                Log::error('OpenAI API Error', [
+                Log::error('Groq API Error', [
                     'status' => $response->status(),
                     'body' => $response->json(),
                 ]);
@@ -61,21 +66,21 @@ class OpenAIService implements AgentService
             }
 
             $responseData = $response->json();
-            $functionCall = $responseData['choices'][0]['message']['function_call'] ?? null;
+            $toolCalls = $responseData['choices'][0]['message']['tool_calls'] ?? null;
 
-            if (! $functionCall || $functionCall['name'] !== 'game_response') {
-                Log::error('OpenAI API Invalid Response', [
-                    'functionCall' => $functionCall,
+            if (! $toolCalls || $toolCalls[0]['function']['name'] !== 'game_response') {
+                Log::error('Groq API Invalid Response', [
+                    'tool_calls' => $toolCalls,
                 ]);
 
                 return $this->getFallbackResponse();
             }
 
-            $arguments = json_decode($functionCall['arguments'], true);
+            $arguments = json_decode($toolCalls[0]['function']['arguments'], true);
 
             if (json_last_error() !== JSON_ERROR_NONE) {
-                Log::error('OpenAI API JSON Parse Error', [
-                    'arguments' => $functionCall['arguments'],
+                Log::error('Groq API JSON Parse Error', [
+                    'arguments' => $toolCalls[0]['function']['arguments'],
                     'error' => json_last_error_msg(),
                 ]);
 
@@ -87,7 +92,7 @@ class OpenAIService implements AgentService
             return $arguments;
 
         } catch (\Exception $e) {
-            Log::error('OpenAI API Exception', [
+            Log::error('Groq API Exception', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -99,16 +104,15 @@ class OpenAIService implements AgentService
     private function getFallbackResponse(): array
     {
         return [
-            'message' => '', // Empty message to avoid spamming the chat
+            'message' => '',
             'reasoning' => 'Encountered an issue processing my thoughts, taking a moment to reflect.',
             'vote' => null,
             'mission_action' => null,
         ];
     }
-    
+
     private function extractCurrentPhase(array $messages): string
     {
-        // Look for phase information in recent system messages
         foreach (array_reverse($messages) as $message) {
             if ($message['role'] === 'system' && str_contains($message['content'], 'Phase:')) {
                 if (preg_match('/Phase:\s*(\w+)/', $message['content'], $matches)) {
@@ -116,9 +120,10 @@ class OpenAIService implements AgentService
                 }
             }
         }
+
         return 'unknown';
     }
-    
+
     private function getPhaseSpecificParameters(string $phase): array
     {
         $baseProperties = [
@@ -131,11 +136,9 @@ class OpenAIService implements AgentService
                 'description' => 'Private internal reasoning — your true thoughts and strategy, not visible to others',
             ],
         ];
-        
+
         $required = ['reasoning'];
-        
-        // Add phase-specific properties
-        // Phases ending in _must_act indicate the player MUST provide the action field.
+
         switch ($phase) {
             case 'team_proposal_leader':
                 $baseProperties['team_proposal'] = [
@@ -146,7 +149,6 @@ class OpenAIService implements AgentService
                 break;
 
             case 'team_proposal':
-                // Non-leader during proposal phase — can only chat
                 break;
 
             case 'team_voting':
@@ -158,7 +160,6 @@ class OpenAIService implements AgentService
                 break;
 
             case 'team_voting_voted':
-                // Player has already voted — they can chat but don't need to vote again
                 break;
 
             case 'mission_on_team':
@@ -170,7 +171,6 @@ class OpenAIService implements AgentService
                 break;
 
             case 'mission':
-                // Observer — not on mission team, can only chat
                 break;
 
             case 'assassination_assassin':
@@ -182,10 +182,9 @@ class OpenAIService implements AgentService
                 break;
 
             case 'assassination':
-                // Non-assassin during assassination — can only chat
                 break;
         }
-        
+
         return [
             'type' => 'object',
             'properties' => $baseProperties,

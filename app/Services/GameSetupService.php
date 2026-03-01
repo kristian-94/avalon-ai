@@ -71,6 +71,7 @@ CRITICAL — PUBLIC CHAT RULES: Your `message` field (public chat) must sound li
         $mode = $humanPlayers > 0 ? 'play' : 'watch';
         DB::transaction(static function () use ($mode, $preferredRole, &$game) {
             $roles = ['merlin', 'assassin', 'loyal_servant', 'loyal_servant', 'minion'];
+            shuffle($roles);
 
             // 1. Create the game with structured data
             $game = Game::create([

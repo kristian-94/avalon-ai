@@ -15,6 +15,7 @@
               <div v-for="v in event.event_data.breakdown" :key="v.player" class="flex items-center gap-2 text-xs">
                 <span :class="v.approved ? 'text-green-400' : 'text-red-400'">{{ v.approved ? '✓' : '✗' }}</span>
                 <span class="text-white/80">{{ v.player }}</span>
+                <span v-if="v.player === event.event_data.proposed_by" class="text-yellow-400" title="Team Leader">&#9878;</span>
               </div>
             </template>
             <template v-else-if="event.event_type === 'mission_complete'">

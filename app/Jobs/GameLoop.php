@@ -62,7 +62,7 @@ class GameLoop implements ShouldQueue
         // Cost runaway protection: limit concurrent active games
         $maxActiveGames = (int) env('MAX_ACTIVE_GAMES', 2);
         $activeGames = Game::whereNull('ended_at')
-            ->whereNotIn('current_phase', ['game_over', 'finished'])
+            ->whereNotIn('current_phase', ['game_over', 'finished', 'debrief'])
             ->count();
         if ($activeGames > $maxActiveGames) {
             Log::warning("Game {$game->id} paused: {$activeGames} active games exceeds MAX_ACTIVE_GAMES={$maxActiveGames}");
@@ -101,9 +101,23 @@ class GameLoop implements ShouldQueue
         // Check if we need to transition to a new phase
         $this->checkPhaseTransition($game);
 
-        // In debrief, stop re-dispatching once all AI players have spoken — nothing left to do.
+        // In debrief, keep polling so AI players respond when the human chats.
+        // Only stop if no human messages in the last 5 minutes (human has left).
         if ($game->current_phase === 'debrief' && $aiTurnsProcessed === 0) {
-            return;
+            $lastHumanMessage = $game->messages()
+                ->where('message_type', 'public_chat')
+                ->whereHas('player', fn ($q) => $q->where('is_human', true))
+                ->latest()
+                ->first();
+
+            $humanIdleMinutes = $lastHumanMessage
+                ? $lastHumanMessage->created_at->diffInMinutes(now())
+                : ($game->gameEvents()->where('event_type', 'game_end')->first()?->created_at?->diffInMinutes(now()) ?? 999);
+
+            if ($humanIdleMinutes >= 5) {
+                $this->concludeGame($game);
+                return;
+            }
         }
 
         // When waiting for human input (no AI work done), use a poll interval to avoid queue flooding.
@@ -850,6 +864,7 @@ class GameLoop implements ShouldQueue
                         'approved' => $voteApproved,
                         'votes_for' => $approvalVotes,
                         'votes_against' => $rejectionVotes,
+                        'proposed_by' => $proposal->proposedBy->name,
                         'breakdown' => $allVotes->map(fn ($v) => [
                             'player' => $v->player->name,
                             'approved' => (bool) $v->approved,
