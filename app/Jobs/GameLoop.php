@@ -368,7 +368,16 @@ class GameLoop implements ShouldQueue
         }
 
         // Handle team proposal
-        if ($game->current_phase === 'team_proposal' && isset($response['team_proposal']) && $game->current_leader_id === $player->id) {
+        if ($game->current_phase === 'team_proposal' && isset($response['team_proposal']) && $game->current_leader_id === $player->id && $game->currentProposal === null) {
+            // Add team members to proposal (case-insensitive name match against loaded players)
+            $allPlayers = $game->players;
+            $proposedPlayers = collect(explode(',', $response['team_proposal']))
+                ->map(fn ($name) => $allPlayers->first(fn ($p) => strtolower($p->name) === strtolower(trim($name))))
+                ->filter();
+
+            if ($proposedPlayers->isEmpty()) {
+                Log::warning("Game {$game->id}: {$player->name} proposed unrecognised player names, skipping: {$response['team_proposal']}");
+            } else {
             $proposal = MissionProposal::create([
                 'game_id' => $game->id,
                 'mission_id' => $game->currentMission->id,
@@ -376,11 +385,6 @@ class GameLoop implements ShouldQueue
                 'proposal_number' => $game->currentMission->proposals()->max('proposal_number') + 1 ?? 1,
                 'status' => 'pending',
             ]);
-
-            // Add team members to proposal
-            $proposedPlayers = collect(explode(',', $response['team_proposal']))
-                ->map(fn ($name) => $game->players()->where('name', trim($name))->first())
-                ->filter();
 
             foreach ($proposedPlayers as $proposedPlayer) {
                 MissionProposalMember::create([
@@ -401,6 +405,7 @@ class GameLoop implements ShouldQueue
                     'proposal_number' => $proposal->proposal_number,
                 ],
             ]);
+            } // end else (valid team size)
         }
 
         // Handle assassination
