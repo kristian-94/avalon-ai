@@ -240,12 +240,12 @@ class GameLoopTest extends TestCase
         $this->assertCount(0, MissionProposalVote::all());
         // Create approval votes from all eligible players
         $eligiblePlayers = $this->gameLoop->getEligiblePlayers($this->game->fresh());
-        $this->assertCount(4, $eligiblePlayers);
+        $this->assertCount(5, $eligiblePlayers);
         foreach ($eligiblePlayers as $player) {
-            // Each player votes privately.
+            // Each player votes privately, including the leader.
             $this->gameLoop->processPlayerVote($this->game->fresh(), $player, true);
         }
-        $this->assertCount(4, MissionProposalVote::all(), 'The team leader should not vote.');
+        $this->assertCount(5, MissionProposalVote::all(), 'All players including the leader should vote.');
 
         $this->assertEquals('pending', $proposal->fresh()->status);
         $this->game->refresh();
@@ -291,15 +291,15 @@ class GameLoopTest extends TestCase
         $this->assertCount(0, MissionProposalVote::all());
         // Create approval votes from all eligible players
         $eligiblePlayers = $this->gameLoop->getEligiblePlayers($this->game->fresh());
-        $this->assertCount(4, $eligiblePlayers);
+        $this->assertCount(5, $eligiblePlayers);
         foreach ($eligiblePlayers as $index => $player) {
-            // Each player votes privately, this time the vote is split, fails.
+            // Each player votes privately, including the leader. Split: 2 approve, 3 reject.
             $this->gameLoop->processPlayerVote($this->game->fresh(), $player, $index < 2);
         }
-        $this->assertCount(4, MissionProposalVote::all(), 'The team leader should not vote.');
+        $this->assertCount(5, MissionProposalVote::all(), 'All players including the leader should vote.');
 
         $this->assertEquals(2, MissionProposalVote::where('approved', true)->count());
-        $this->assertEquals(2, MissionProposalVote::where('approved', false)->count());
+        $this->assertEquals(3, MissionProposalVote::where('approved', false)->count());
 
         $this->assertEquals('pending', $proposal->fresh()->status);
         $this->game->refresh();
@@ -980,7 +980,7 @@ class GameLoopTest extends TestCase
         $this->assertCount(4, $aiEligible, 'All 4 AI players should be eligible in setup');
     }
 
-    public function test_eligible_players_in_team_voting_excludes_leader(): void
+    public function test_eligible_players_in_team_voting_includes_leader(): void
     {
         $this->game->update([
             'current_phase' => 'team_voting',
@@ -998,10 +998,8 @@ class GameLoopTest extends TestCase
 
         $eligible = $this->gameLoop->getEligiblePlayers($this->game->fresh());
 
-        $this->assertCount(4, $eligible);
-        foreach ($eligible as $player) {
-            $this->assertNotEquals($this->players[0]->id, $player->id, 'Leader should not be eligible to vote');
-        }
+        // All 5 players vote including the leader
+        $this->assertCount(5, $eligible);
     }
 
     public function test_eligible_players_in_mission_only_team_members(): void
@@ -1185,9 +1183,8 @@ class GameLoopTest extends TestCase
         }
         $this->game->update(['current_proposal_id' => $proposal->id]);
 
-        // Simulate: human (and 3 AI) all vote approve — so all 4 non-leader votes are in
-        $nonLeaders = array_filter($this->players, fn ($p) => $p->id !== $leader->id);
-        foreach ($nonLeaders as $p) {
+        // Simulate: all 5 players vote approve (leader now votes too)
+        foreach ($this->players as $p) {
             MissionProposalVote::create(['proposal_id' => $proposal->id, 'player_id' => $p->id, 'approved' => true]);
         }
 

@@ -67,13 +67,13 @@ class TeamVotingMechanicsTest extends TestCase
         $game->update(['current_proposal_id' => $proposal->id]);
 
         $gameLoop = new GameLoop($game->id);
-        
-        // Process votes - 3 approve, 1 reject (leader doesn't vote)
+
+        // Process votes - 3 approve, 2 reject (all 5 players vote including leader)
         $eligiblePlayers = $gameLoop->getEligiblePlayers($game->fresh());
         foreach ($eligiblePlayers as $index => $player) {
             $gameLoop->processPlayerVote($game->fresh(), $player, $index < 3);
         }
-        
+
         $gameLoop->checkPhaseTransition($game->fresh());
 
         $game->refresh();
@@ -81,12 +81,12 @@ class TeamVotingMechanicsTest extends TestCase
 
         $this->assertEquals('mission', $game->current_phase);
         $this->assertEquals('approved', $proposal->status);
-        
+
         // Verify votes were recorded
         $votes = MissionProposalVote::where('proposal_id', $proposal->id)->get();
-        $this->assertEquals(4, $votes->count()); // Leader doesn't vote
+        $this->assertEquals(5, $votes->count()); // All players vote including leader
         $this->assertEquals(3, $votes->where('approved', true)->count());
-        $this->assertEquals(1, $votes->where('approved', false)->count());
+        $this->assertEquals(2, $votes->where('approved', false)->count());
     }
 
     public function test_majority_rejection_returns_to_proposal()
@@ -132,8 +132,8 @@ class TeamVotingMechanicsTest extends TestCase
         ]);
 
         $gameLoop = new GameLoop($game->id);
-        
-        // Process votes - 1 approve, 3 reject
+
+        // Process votes - 1 approve, 4 reject (all 5 players vote including leader)
         $eligiblePlayers = $gameLoop->getEligiblePlayers($game->fresh());
         foreach ($eligiblePlayers as $index => $player) {
             $gameLoop->processPlayerVote($game->fresh(), $player, $index < 1);
@@ -180,12 +180,12 @@ class TeamVotingMechanicsTest extends TestCase
         $game->update(['current_proposal_id' => $proposal->id]);
 
         $gameLoop = new GameLoop($game->id);
-        
-        // Process votes - 1 approve, 2 reject (tie goes to rejection)
+
+        // Process votes - 2 approve, 2 reject (tie goes to rejection; all 4 players vote including leader)
         $eligiblePlayers = $gameLoop->getEligiblePlayers($game->fresh());
         $voteCount = 0;
         foreach ($eligiblePlayers as $player) {
-            $gameLoop->processPlayerVote($game->fresh(), $player, $voteCount < 1);
+            $gameLoop->processPlayerVote($game->fresh(), $player, $voteCount < 2);
             $voteCount++;
         }
         
@@ -301,8 +301,8 @@ class TeamVotingMechanicsTest extends TestCase
             $game->update(['current_proposal_id' => $proposal->id]);
 
             $gameLoop = new GameLoop($game->id);
-            
-            // Process votes - 3 approve, 1 reject
+
+            // Process votes - 3 approve, 2 reject (all 5 players vote including leader)
             $eligiblePlayers = $gameLoop->getEligiblePlayers($game->fresh());
             foreach ($eligiblePlayers as $index => $player) {
                 $gameLoop->processPlayerVote($game->fresh(), $player, $index < 3);

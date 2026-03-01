@@ -118,7 +118,7 @@ class HumanActionEndpointsTest extends TestCase
         $response->assertJson(['error' => 'Not in team_voting phase']);
     }
 
-    public function test_leader_cannot_vote(): void
+    public function test_leader_can_vote(): void
     {
         $humanPlayer = $this->players->firstWhere('is_human', true);
 
@@ -142,8 +142,7 @@ class HumanActionEndpointsTest extends TestCase
             'approved' => true,
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJson(['error' => 'Leader cannot vote']);
+        $response->assertStatus(200);
     }
 
     public function test_player_cannot_vote_twice(): void
@@ -468,8 +467,8 @@ class HumanActionEndpointsTest extends TestCase
 
         $this->game->update(['current_proposal_id' => $proposal->id]);
 
-        // All non-leader AI players vote
-        $nonLeaderAIPlayers = $this->players->where('is_human', false)->where('id', '!=', $leader->id);
+        // All other AI players vote (leader also votes now, so only exclude the human)
+        $nonLeaderAIPlayers = $this->players->where('is_human', false);
         foreach ($nonLeaderAIPlayers as $player) {
             MissionProposalVote::create([
                 'proposal_id' => $proposal->id,

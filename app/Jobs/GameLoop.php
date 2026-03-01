@@ -198,14 +198,12 @@ class GameLoop implements ShouldQueue
                 $lastMessageTime = $lastMessage?->created_at ?? now();
 
                 $unvoted = $game->players()
-                    ->where('id', '!=', $game->current_leader_id)
                     ->whereDoesntHave('proposalVotes', function ($query) use ($game) {
                         $query->where('proposal_id', $game->current_proposal_id);
                     })
                     ->get();
 
                 $voted = $game->players()
-                    ->where('id', '!=', $game->current_leader_id)
                     ->whereHas('proposalVotes', function ($query) use ($game) {
                         $query->where('proposal_id', $game->current_proposal_id);
                     })
@@ -757,7 +755,7 @@ class GameLoop implements ShouldQueue
         $totalVotes = $game->currentProposal->votes()->count();
         $totalPlayers = $game->players()->count();
 
-        return $totalVotes >= ($totalPlayers - 1);
+        return $totalVotes >= $totalPlayers;
     }
 
     public function shouldTransitionFromMission(Game $game): bool
@@ -797,14 +795,13 @@ class GameLoop implements ShouldQueue
         if ($previousPhase === 'team_voting') {
             $game->current_proposal_id = null;
             $totalVotes = $game->currentProposal->votes()->count();
-            $nonLeaderCount = $game->players()->count() - 1; // Everyone votes except the leader
+            $playerCount = $game->players()->count(); // All players vote, including the leader
 
-            if ($totalVotes >= $nonLeaderCount) {
+            if ($totalVotes >= $playerCount) {
                 $allVotes = $game->currentProposal->votes()->with('player')->get();
                 $approvalVotes = $allVotes->where('approved', true)->count();
                 $rejectionVotes = $allVotes->where('approved', false)->count();
-                $majorityThreshold = ($nonLeaderCount / 2) + 1; // Majority required
-                $voteApproved = $approvalVotes >= $majorityThreshold;
+                $voteApproved = $approvalVotes > ($playerCount / 2); // Strict majority required
 
                 if ($voteApproved) {
                     // If approved, move team members to mission (idempotent)

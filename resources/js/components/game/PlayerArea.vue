@@ -6,7 +6,13 @@
         :class="[
         'group relative bg-black/40 backdrop-blur-sm rounded-lg p-4 transition-all duration-200 flex flex-col items-center text-center',
         'hover:bg-black/60 hover:scale-[1.03] hover:shadow-xl hover:shadow-black/40',
-        player.id === currentLeader ? 'ring-2 ring-yellow-500/50' : '',
+        isOnMission(player.player_index)
+          ? 'ring-4 ring-green-400 shadow-lg shadow-green-500/40'
+          : isProposed(player.player_index)
+            ? 'ring-4 ring-blue-400 shadow-lg shadow-blue-500/30'
+            : player.id === currentLeader
+              ? 'ring-2 ring-yellow-500/50'
+              : '',
       ]"
     >
       <!-- Avatar -->
@@ -24,13 +30,13 @@
               Current Leader — proposes the mission team
             </div>
           </div>
-          <div v-if="currentProposal?.playerIndexes?.includes(player.player_index) && gameState?.currentPhase === 'team_voting'" class="relative group/tip">
+          <div v-if="isProposed(player.player_index)" class="relative group/tip">
             <div class="text-blue-400 text-lg cursor-default drop-shadow-lg">🛡️</div>
             <div class="absolute bottom-full right-0 mb-1.5 px-2 py-1 bg-black/90 border border-blue-500/30 text-blue-200 text-xs rounded whitespace-nowrap invisible group-hover/tip:visible opacity-0 group-hover/tip:opacity-100 transition-opacity z-20 pointer-events-none">
               Proposed for this mission
             </div>
           </div>
-          <div v-if="gameState?.currentMission?.playerIndexes?.includes(player.player_index) && gameState?.currentPhase === 'mission'" class="relative group/tip">
+          <div v-if="isOnMission(player.player_index)" class="relative group/tip">
             <div class="text-green-400 text-lg cursor-default drop-shadow-lg">⚔️</div>
             <div class="absolute bottom-full right-0 mb-1.5 px-2 py-1 bg-black/90 border border-green-500/30 text-green-200 text-xs rounded whitespace-nowrap invisible group-hover/tip:visible opacity-0 group-hover/tip:opacity-100 transition-opacity z-20 pointer-events-none">
               On the active mission team
@@ -126,4 +132,15 @@ const missions = computed(() => props.gameState.missions ?? [])
 const currentProposal = computed(() => props.gameState.currentProposal ?? null)
 const assassination = computed(() => props.gameState.assassination)
 const isGameFinished = computed(() => props.gameState.currentPhase === 'finished' || props.gameState.currentPhase === 'debrief')
+
+const isProposed = (playerIndex: number) => {
+  const phase = props.gameState?.currentPhase
+  if (phase !== 'team_proposal' && phase !== 'team_voting') return false
+  return props.gameState?.currentProposal?.playerIndexes?.includes(playerIndex) ?? false
+}
+
+const isOnMission = (playerIndex: number) => {
+  if (props.gameState?.currentPhase !== 'mission') return false
+  return props.gameState?.currentMission?.playerIndexes?.includes(playerIndex) ?? false
+}
 </script>

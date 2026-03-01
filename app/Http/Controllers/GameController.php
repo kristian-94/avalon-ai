@@ -196,9 +196,6 @@ class GameController extends Controller
             return response()->json(['error' => 'Not in team_voting phase'], 422);
         }
 
-        if ($game->current_leader_id === $player->id) {
-            return response()->json(['error' => 'Leader cannot vote'], 422);
-        }
 
         $alreadyVoted = $game->currentProposal->votes->where('player_id', $player->id)->isNotEmpty();
         if ($alreadyVoted) {

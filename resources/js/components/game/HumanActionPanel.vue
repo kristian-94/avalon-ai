@@ -172,7 +172,6 @@ watch(() => props.gameState?.currentMission?.id, () => { missionSubmitted.value 
 
 const showVoting = computed(() => {
   if (props.gameState?.currentPhase !== 'team_voting') return false
-  if (props.gameState?.currentLeader === props.playerId) return false
   const votes = props.gameState?.currentProposal?.votes || {}
   return votes[props.playerId] === undefined
 })
