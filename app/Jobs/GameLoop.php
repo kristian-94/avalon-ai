@@ -491,7 +491,7 @@ class GameLoop implements ShouldQueue
         $effectivePhase = $game->current_phase;
         if ($game->current_phase === 'team_voting' && $game->currentProposal) {
             $hasVoted = $game->currentProposal->votes->where('player_id', $player->id)->isNotEmpty();
-            if ($hasVoted || $game->current_leader_id === $player->id) {
+            if ($hasVoted) {
                 $effectivePhase = 'team_voting_voted';
             }
         } elseif ($game->current_phase === 'team_proposal' && $game->current_leader_id === $player->id) {
@@ -652,10 +652,10 @@ class GameLoop implements ShouldQueue
                 break;
             case 'team_voting':
                 $hasVoted = $game->currentProposal->votes->where('player_id', $player->id)->isNotEmpty();
-                if (!$hasVoted && $game->current_leader_id !== $player->id) {
+                if (!$hasVoted) {
                     $summary .= "Vote on the proposed team (you MUST include a vote: true/false in your response).\n";
                 } else {
-                    $summary .= "Wait for others to vote. You can discuss.\n";
+                    $summary .= "You have voted. Wait for others to vote. You can discuss.\n";
                 }
                 break;
             case 'mission':
