@@ -83,9 +83,9 @@ const initializeGame = async () => {
     // Initialize WebSocket connection
     initializeWebSocket()
 
-    // Polling fallback: refresh state every 250ms while game is active
+    // Polling fallback: WebSockets handle real-time updates; this is just a safety net
     if (!gameData.ended_at) {
-      pollInterval = setInterval(pollGameState, 250)
+      pollInterval = setInterval(pollGameState, 5000)
     }
   } catch (err) {
     console.error('Failed to fetch game state:', err)

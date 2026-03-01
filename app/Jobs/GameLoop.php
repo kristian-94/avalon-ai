@@ -66,6 +66,8 @@ class GameLoop implements ShouldQueue
             ->count();
         if ($activeGames > $maxActiveGames) {
             Log::warning("Game {$game->id} paused: {$activeGames} active games exceeds MAX_ACTIVE_GAMES={$maxActiveGames}");
+            // Re-dispatch after a delay so it retries when other games finish
+            self::dispatch($this->gameId)->delay(now()->addSeconds(30));
             return;
         }
 
