@@ -55,6 +55,17 @@ class GameLoop implements ShouldQueue
         // Discard stale jobs for games that haven't had any activity in over 2 hours
         if ($game->updated_at && $game->updated_at->lt(now()->subHours(2))) {
             Log::info("Game {$game->id} is stale (last activity: {$game->updated_at}), discarding job.");
+            $game->update(['current_phase' => 'finished', 'ended_at' => now()]);
+            return;
+        }
+
+        // Cost runaway protection: limit concurrent active games
+        $maxActiveGames = (int) env('MAX_ACTIVE_GAMES', 2);
+        $activeGames = Game::whereNull('ended_at')
+            ->whereNotIn('current_phase', ['game_over', 'finished'])
+            ->count();
+        if ($activeGames > $maxActiveGames) {
+            Log::warning("Game {$game->id} paused: {$activeGames} active games exceeds MAX_ACTIVE_GAMES={$maxActiveGames}");
             return;
         }
 
