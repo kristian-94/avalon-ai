@@ -73,6 +73,18 @@ class GameLoopImprovementsTest extends TestCase
         MissionTeamMember::create(['mission_id' => $mission1->id, 'player_id' => $this->players[0]->id]);
         MissionTeamMember::create(['mission_id' => $mission1->id, 'player_id' => $this->players[1]->id]);
 
+        // Add mission_complete GameEvent so the game log picks it up
+        \App\Models\GameEvent::create([
+            'game_id' => $this->game->id,
+            'event_type' => 'mission_complete',
+            'event_data' => [
+                'mission_number' => 1,
+                'success' => true,
+                'fail_votes' => 0,
+                'team' => ['Max', 'Alex'],
+            ],
+        ]);
+
         // Generate summary for a player
         $summary = $this->invokeMethod($this->gameLoop, 'generateGameStateSummary', [$this->game->fresh(), $this->players[0]]);
 
@@ -81,7 +93,7 @@ class GameLoopImprovementsTest extends TestCase
         $this->assertStringContainsString('Missions: 1 successful, 0 failed', $summary);
         $this->assertStringContainsString('Current Mission: #2 (requires 3 players)', $summary);
         $this->assertStringContainsString('Current Leader: Max (YOU)', $summary);
-        $this->assertStringContainsString('Mission #1: SUCCESS - Team: Max, Alex', $summary);
+        $this->assertStringContainsString('Mission 1 — SUCCESS — Team: Max, Alex', $summary);
         $this->assertStringContainsString('You are the leader. Propose a team of 3 players', $summary);
     }
 
@@ -240,25 +252,60 @@ class GameLoopImprovementsTest extends TestCase
             'current_mission_id' => $mission->id,
         ]);
 
-        // Create multiple rejected proposals
+        // Create multiple rejected proposals with corresponding GameEvents
+        $proposerNames = ['Max', 'Alex', 'Sam'];
         for ($i = 1; $i <= 3; $i++) {
+            $proposer = $this->players[($i - 1) % 5];
             $proposal = MissionProposal::create([
                 'game_id' => $this->game->id,
                 'mission_id' => $mission->id,
-                'proposed_by_id' => $this->players[($i - 1) % 5]->id,
+                'proposed_by_id' => $proposer->id,
                 'proposal_number' => $i,
                 'status' => 'rejected',
+            ]);
+
+            \App\Models\GameEvent::create([
+                'game_id' => $this->game->id,
+                'event_type' => 'team_proposal',
+                'event_data' => [
+                    'proposed_by' => $proposerNames[$i - 1],
+                    'team' => [$proposerNames[$i - 1], 'Jordan'],
+                    'proposal_number' => $i,
+                ],
+            ]);
+
+            \App\Models\GameEvent::create([
+                'game_id' => $this->game->id,
+                'event_type' => 'team_vote',
+                'event_data' => [
+                    'approved' => false,
+                    'votes_for' => 1,
+                    'votes_against' => 4,
+                    'proposed_by' => $proposerNames[$i - 1],
+                    'breakdown' => [
+                        ['player' => $proposerNames[$i - 1], 'approved' => true],
+                        ['player' => 'Jordan', 'approved' => false],
+                        ['player' => 'Riley', 'approved' => false],
+                        ['player' => 'Alex', 'approved' => false],
+                        ['player' => 'Sam', 'approved' => false],
+                    ],
+                ],
             ]);
         }
 
         // Generate summary
         $summary = $this->invokeMethod($this->gameLoop, 'generateGameStateSummary', [$this->game->fresh(), $this->players[0]]);
 
-        // Should show proposal history
-        $this->assertStringContainsString('Proposals this mission: 3', $summary);
-        $this->assertStringContainsString('Proposal #1 by Max: rejected', $summary);
-        $this->assertStringContainsString('Proposal #2 by Alex: rejected', $summary);
-        $this->assertStringContainsString('Proposal #3 by Sam: rejected', $summary);
+        // Should show proposal and vote history in game log
+        $this->assertStringContainsString('Max proposed: Max, Jordan', $summary);
+        $this->assertStringContainsString('Alex proposed: Alex, Jordan', $summary);
+        $this->assertStringContainsString('Sam proposed: Sam, Jordan', $summary);
+        $this->assertStringContainsString('1 approve / 4 reject — REJECTED', $summary);
+
+        // Should show player tracker
+        $this->assertStringContainsString('PLAYER TRACKER', $summary);
+        $this->assertStringContainsString('Max:', $summary);
+        $this->assertStringContainsString('Proposed [#1a:', $summary);
     }
 
     public function test_assassination_phase_shows_correct_instructions()

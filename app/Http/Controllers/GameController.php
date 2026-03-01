@@ -10,6 +10,7 @@ use App\Models\GameEvent;
 use App\Models\Message;
 use App\Models\MissionProposal;
 use App\Models\MissionProposalMember;
+use App\Models\MissionProposalVote;
 use App\Models\MissionTeamMember;
 use App\Models\Player;
 use App\Services\GameSetupService;
@@ -259,6 +260,13 @@ class GameController extends Controller
 
         $game->current_proposal_id = $proposal->id;
         $game->save();
+
+        // Auto-approve the proposer's own vote
+        MissionProposalVote::create([
+            'proposal_id' => $proposal->id,
+            'player_id' => $player->id,
+            'approved' => true,
+        ]);
 
         GameEvent::create([
             'game_id' => $game->id,

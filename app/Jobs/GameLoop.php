@@ -92,6 +92,14 @@ class GameLoop implements ShouldQueue
             if (! $player->is_human) {
                 $this->processAIPlayerTurn($game, $player);
                 $aiTurnsProcessed++;
+            } elseif ($game->current_phase === 'mission' && ! in_array($player->role, ['assassin', 'minion'])) {
+                // Human good player on a mission always votes success — auto-submit so they don't have to click
+                $teamMember = $game->currentMission?->teamMembers->firstWhere('player_id', $player->id);
+                if ($teamMember && $teamMember->vote_success === null) {
+                    $teamMember->update(['vote_success' => true]);
+                    broadcast(new GameStateUpdate($game->fresh()));
+                    $aiTurnsProcessed++; // counts as activity so the loop keeps moving
+                }
             }
         }
 
@@ -351,6 +359,24 @@ class GameLoop implements ShouldQueue
         Log::info("AI turn: {$player->name} ({$player->role}) | phase={$game->current_phase} | missions S{$successCount}/F{$failCount}");
         $response = Agent::getChatResponse($messages);
 
+        // Dump full API context for loyal_servant players for debugging
+        if ($player->role === 'loyal_servant') {
+            $dumpDir = storage_path('app/ai-dumps');
+            if (!is_dir($dumpDir)) {
+                mkdir($dumpDir, 0755, true);
+            }
+            $timestamp = now()->format('Y-m-d_H-i-s');
+            $filename = "{$dumpDir}/game{$game->id}_{$player->name}_{$game->current_phase}_{$timestamp}.json";
+            file_put_contents($filename, json_encode([
+                'game_id' => $game->id,
+                'player' => $player->name,
+                'role' => $player->role,
+                'phase' => $game->current_phase,
+                'messages' => $messages,
+                'response' => $response,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
+
         // Track API usage
         if (! empty($response['_usage'])) {
             $game->increment('api_calls');
@@ -538,29 +564,50 @@ class GameLoop implements ShouldQueue
             $effectivePhase = 'assassination_assassin';
         }
         $summary .= "Phase: {$effectivePhase}\n";
-        
+
         // Mission status
         $successfulMissions = $game->missions()->where('status', 'success')->count();
         $failedMissions = $game->missions()->where('status', 'fail')->count();
         $summary .= "Missions: {$successfulMissions} successful, {$failedMissions} failed\n";
-        
-        // Current mission details
+
+        // Win condition summary
+        $goodNeeds = max(0, 3 - $successfulMissions);
+        $evilNeeds = max(0, 3 - $failedMissions);
+        $summary .= "Win conditions: Good needs {$goodNeeds} more success(es). Evil needs {$evilNeeds} more failure(s).\n";
+
+        // === GAME LOG — built from GameEvent records ===
+        $events = $game->gameEvents()->orderBy('id')->get();
+        $gameLog = $this->buildGameLog($events);
+        if ($gameLog !== '') {
+            $summary .= "\n=== GAME LOG ===\n" . $gameLog;
+        }
+
+        // === PLAYER TRACKER ===
+        $playerTracker = $this->buildPlayerTracker($game, $events);
+        if ($playerTracker !== '') {
+            $summary .= "\n=== PLAYER TRACKER ===\n" . $playerTracker;
+        }
+
+        // === VOTE PATTERN ANALYSIS ===
+        $votePatternAnalysis = $this->buildVotePatternAnalysis($game, $events);
+        if ($votePatternAnalysis !== '') {
+            $summary .= "\n=== VOTE PATTERN ANALYSIS ===\n" . $votePatternAnalysis;
+        }
+
+        // === CURRENT SITUATION ===
+        $summary .= "\n=== CURRENT SITUATION ===\n";
         if ($game->currentMission) {
             $summary .= "Current Mission: #{$game->currentMission->mission_number} (requires {$game->currentMission->required_players} players)\n";
-            
-            // Proposal history for current mission
-            $proposals = $game->currentMission->proposals()->orderBy('proposal_number')->get();
-            if ($proposals->isNotEmpty()) {
-                $summary .= "Proposals this mission: {$proposals->count()}\n";
-                foreach ($proposals as $proposal) {
-                    if ($proposal->status !== 'pending') {
-                        $summary .= "  - Proposal #{$proposal->proposal_number} by {$proposal->proposedBy->name}: {$proposal->status}\n";
-                    }
+            $rejectedCount = $game->currentMission->proposals()->where('status', 'rejected')->count();
+            if ($rejectedCount > 0) {
+                $remaining = 5 - $rejectedCount;
+                if ($rejectedCount >= 3) {
+                    $summary .= "🚨 DANGER: {$rejectedCount} proposals rejected this round! Only {$remaining} rejection(s) left before EVIL WINS AUTOMATICALLY. You should APPROVE the next reasonable team even if it's imperfect — a risky mission is better than handing evil a free win through rejections.\n";
+                } else {
+                    $summary .= "⚠️ Rejected proposals this round: {$rejectedCount}/5 — {$remaining} more rejection(s) and EVIL WINS AUTOMATICALLY.\n";
                 }
             }
         }
-        
-        // Current leader
         if ($game->current_leader_id) {
             $isLeader = $game->current_leader_id === $player->id;
             $leader = $game->players()->find($game->current_leader_id);
@@ -568,54 +615,33 @@ class GameLoop implements ShouldQueue
                 $summary .= "Current Leader: {$leader->name}" . ($isLeader ? " (YOU)" : "") . "\n";
             }
         }
-        
-        // Current proposal details if in voting phase
         if ($game->current_phase === 'team_voting' && $game->currentProposal) {
             $proposedTeam = $game->currentProposal->teamMembers->pluck('player.name')->join(', ');
             $summary .= "Proposed Team: {$proposedTeam}\n";
-            
-            // Who has voted
             $votedPlayers = $game->currentProposal->votes->pluck('player.name')->join(', ');
             if ($votedPlayers) {
                 $summary .= "Already Voted: {$votedPlayers}\n";
             }
         }
-        
-        // Mission team if in mission phase
         if ($game->current_phase === 'mission' && $game->currentMission) {
             $missionTeam = $game->currentMission->teamMembers->pluck('player.name')->join(', ');
             $summary .= "Mission Team: {$missionTeam}\n";
-            
             $onMission = $game->currentMission->teamMembers->where('player_id', $player->id)->isNotEmpty();
             if ($onMission) {
                 $summary .= "You are ON this mission team.\n";
             }
         }
-        
-        // Previous mission results
-        $completedMissions = $game->missions()->whereIn('status', ['success', 'fail'])->orderBy('mission_number')->get();
-        if ($completedMissions->isNotEmpty()) {
-            $summary .= "\nPrevious Missions:\n";
-            foreach ($completedMissions as $mission) {
-                $teamMembers = $mission->teamMembers->pluck('player.name')->join(', ');
-                $result = $mission->status === 'success' ? 'SUCCESS' : "FAILED ({$mission->fail_votes} fail votes)";
-                $summary .= "  Mission #{$mission->mission_number}: {$result} - Team: {$teamMembers}\n";
-            }
-        }
 
-        // Win condition summary (visible to all, helps everyone reason about urgency)
-        $goodNeeds = max(0, 3 - $successfulMissions);
-        $evilNeeds = max(0, 3 - $failedMissions);
-        $summary .= "\nWin conditions: Good needs {$goodNeeds} more success(es). Evil needs {$evilNeeds} more failure(s).\n";
-
-        // Evil-player-only intel block
+        // === YOUR ROLE (evil intel) ===
         $isEvil = in_array($player->role, ['assassin', 'minion']);
         if ($isEvil) {
             $knownEvilNames = array_keys($player->role_knowledge['knownRoles'] ?? []);
-            $evilNames = array_merge([$player->name], $knownEvilNames); // self + partner(s)
+            $evilNames = array_merge([$player->name], $knownEvilNames);
 
             $summary .= "\n=== YOUR EVIL TEAM INTEL ===\n";
+            $partnerNames = implode(' and ', $knownEvilNames);
             $summary .= "Evil players (you + partner): " . implode(', ', $evilNames) . "\n";
+            $summary .= "REMINDER: {$partnerNames} is on YOUR side. You KNOW they are evil like you. NEVER genuinely suspect, doubt, or work against your partner. Your public chat should cast suspicion on GOOD players, not on {$partnerNames}. If you mention {$partnerNames} in chat, defend them or stay neutral — never build a case against your own teammate.\n";
 
             if ($goodNeeds === 1) {
                 $summary .= "⚠️ CRITICAL: Good team needs just 1 more success to win. You MUST prevent it.\n";
@@ -623,7 +649,6 @@ class GameLoop implements ShouldQueue
                 $summary .= "⚠️ URGENT: Good team needs 2 more successes. Increase pressure now.\n";
             }
 
-            // In voting phase: tell them whether evil is on the proposed team
             if (in_array($game->current_phase, ['team_voting']) && $game->currentProposal) {
                 $proposedNames = $game->currentProposal->teamMembers->pluck('player.name')->toArray();
                 $evilOnProposal = array_values(array_intersect($evilNames, $proposedNames));
@@ -637,13 +662,11 @@ class GameLoop implements ShouldQueue
                 }
             }
 
-            // In proposal phase: remind leader to include evil
             if ($game->current_phase === 'team_proposal' && $game->current_leader_id === $player->id) {
                 $partner = implode(' or ', $knownEvilNames);
                 $summary .= "👑 YOU ARE THE LEADER. Include yourself and/or {$partner} in your proposal. In public chat, frame your proposal as a confident or well-reasoned choice — do NOT hint that you're including yourself or your partner for evil purposes.\n";
             }
 
-            // In mission phase: tell them if evil is on mission and what to do
             if ($game->current_phase === 'mission' && $game->currentMission) {
                 $missionNames = $game->currentMission->teamMembers->pluck('player.name')->toArray();
                 $evilOnMission = array_values(array_intersect($evilNames, $missionNames));
@@ -666,6 +689,9 @@ class GameLoop implements ShouldQueue
         }
 
         $summary .= "=========================\n";
+
+        // Reasoning instruction
+        $summary .= "\nIMPORTANT: Base your reasoning on the GAME LOG and PLAYER TRACKER above. Cite specific evidence (e.g. \"Alex was on Mission 1 which failed\" or \"Jordan voted against 2 approved proposals\"). Do NOT make claims about players that aren't supported by the game record.\n";
 
         // Add phase-specific action reminder
         $summary .= "\nACTION REQUIRED: ";
@@ -716,6 +742,278 @@ class GameLoop implements ShouldQueue
         }
 
         return $summary;
+    }
+
+    /**
+     * Build a chronological game log from GameEvent records, grouped by round (mission number).
+     */
+    private function buildGameLog(\Illuminate\Support\Collection $events): string
+    {
+        $log = '';
+        $currentRound = 0;
+        $proposalCounter = 0; // proposals within a round
+
+        foreach ($events as $event) {
+            $data = $event->event_data;
+            if ($event->event_type === 'team_proposal') {
+                $missionNumber = $this->getMissionNumberForProposal($event, $events);
+                if ($missionNumber !== $currentRound) {
+                    $currentRound = $missionNumber;
+                    $proposalCounter = 0;
+                    $log .= "Round {$currentRound}:\n";
+                }
+                $proposalCounter++;
+                $team = implode(', ', $data['team'] ?? []);
+                $log .= "  {$data['proposed_by']} proposed: {$team}\n";
+            } elseif ($event->event_type === 'team_vote') {
+                $status = $data['approved'] ? 'APPROVED' : 'REJECTED';
+                $log .= "  Vote: {$data['votes_for']} approve / {$data['votes_against']} reject — {$status}\n";
+                // Per-player breakdown
+                if (!empty($data['breakdown'])) {
+                    $voteDetails = [];
+                    foreach ($data['breakdown'] as $vote) {
+                        $symbol = $vote['approved'] ? '✓' : '✗';
+                        $voteDetails[] = "{$symbol} {$vote['player']}";
+                    }
+                    $log .= "    " . implode(', ', $voteDetails) . "\n";
+                }
+            } elseif ($event->event_type === 'mission_complete') {
+                $status = $data['success'] ? 'SUCCESS' : 'FAILED';
+                $failInfo = $data['fail_votes'] > 0 ? " ({$data['fail_votes']} fail vote" . ($data['fail_votes'] > 1 ? 's' : '') . ")" : '';
+                $team = implode(', ', $data['team'] ?? []);
+                $log .= "  Mission {$data['mission_number']} — {$status}{$failInfo} — Team: {$team}\n\n";
+            } elseif ($event->event_type === 'assassination') {
+                $target = $data['assassin_target']['player_name'] ?? 'unknown';
+                $role = $data['assassin_target']['player_role'] ?? 'unknown';
+                $log .= "Assassination: targeted {$target} (was {$role})\n";
+            }
+        }
+
+        return $log;
+    }
+
+    /**
+     * Determine mission number for a proposal event by finding the next mission_complete event after it.
+     */
+    private function getMissionNumberForProposal(GameEvent $proposalEvent, \Illuminate\Support\Collection $events): int
+    {
+        // Find the next mission_complete event after this proposal
+        $nextMission = $events->first(fn ($e) => $e->id > $proposalEvent->id && $e->event_type === 'mission_complete');
+        if ($nextMission) {
+            return $nextMission->event_data['mission_number'] ?? 1;
+        }
+        // No mission_complete yet — this is the current round
+        // Count completed missions + 1
+        $completedMissions = $events->where('event_type', 'mission_complete')->count();
+        return $completedMissions + 1;
+    }
+
+    /**
+     * Build per-player tracker: mission participation, proposals made, vote history.
+     */
+    private function buildPlayerTracker(Game $game, \Illuminate\Support\Collection $events): string
+    {
+        $players = $game->players->pluck('name')->toArray();
+        $tracker = '';
+
+        // Collect data per player
+        $missionResults = []; // player => ['#1 SUCCESS', '#2 FAILED']
+        $proposals = [];      // player => ['#1: A,B → REJECTED']
+        $votes = [];          // player => ['#1a: ✓', '#1b: ✗']
+
+        // Track proposal labels: mission_number + letter (a, b, c...)
+        $currentMission = 0;
+        $proposalLetterIndex = 0;
+        $proposalLabels = []; // event_id => '1a', '1b', etc.
+
+        // First pass: assign labels to proposals
+        foreach ($events as $event) {
+            if ($event->event_type === 'team_proposal') {
+                $missionNum = $this->getMissionNumberForProposal($event, $events);
+                if ($missionNum !== $currentMission) {
+                    $currentMission = $missionNum;
+                    $proposalLetterIndex = 0;
+                }
+                $letter = chr(ord('a') + $proposalLetterIndex);
+                $proposalLabels[$event->id] = "{$missionNum}{$letter}";
+                $proposalLetterIndex++;
+            }
+        }
+
+        // Second pass: collect per-player data
+        $lastProposalEventId = null;
+        foreach ($events as $event) {
+            $data = $event->event_data;
+
+            if ($event->event_type === 'team_proposal') {
+                $lastProposalEventId = $event->id;
+                $proposer = $data['proposed_by'];
+                $team = implode(',', $data['team'] ?? []);
+                // Status will be filled in by the next team_vote event
+                if (!isset($proposals[$proposer])) {
+                    $proposals[$proposer] = [];
+                }
+                $label = $proposalLabels[$event->id] ?? '?';
+                $proposals[$proposer][] = ['label' => $label, 'team' => $team, 'status' => 'pending', 'event_id' => $event->id];
+            } elseif ($event->event_type === 'team_vote') {
+                $status = $data['approved'] ? 'APPROVED' : 'REJECTED';
+                // Update the last proposal's status for the proposer
+                $proposer = $data['proposed_by'] ?? null;
+                if ($proposer && isset($proposals[$proposer])) {
+                    $lastIdx = count($proposals[$proposer]) - 1;
+                    if ($lastIdx >= 0) {
+                        $proposals[$proposer][$lastIdx]['status'] = $status;
+                    }
+                }
+
+                // Record each player's vote
+                $label = $lastProposalEventId ? ($proposalLabels[$lastProposalEventId] ?? '?') : '?';
+                if (!empty($data['breakdown'])) {
+                    foreach ($data['breakdown'] as $vote) {
+                        $pName = $vote['player'];
+                        if (!isset($votes[$pName])) {
+                            $votes[$pName] = [];
+                        }
+                        $symbol = $vote['approved'] ? '✓' : '✗';
+                        $votes[$pName][] = "#{$label}: {$symbol}";
+                    }
+                }
+            } elseif ($event->event_type === 'mission_complete') {
+                $status = $data['success'] ? 'SUCCESS' : 'FAILED';
+                $missionNum = $data['mission_number'];
+                foreach ($data['team'] ?? [] as $pName) {
+                    if (!isset($missionResults[$pName])) {
+                        $missionResults[$pName] = [];
+                    }
+                    $missionResults[$pName][] = "#{$missionNum} {$status}";
+                }
+            }
+        }
+
+        foreach ($players as $name) {
+            $parts = [];
+
+            // Missions
+            $missions = $missionResults[$name] ?? [];
+            $parts[] = 'Missions [' . (empty($missions) ? 'none' : implode(', ', $missions)) . ']';
+
+            // Proposals
+            $props = $proposals[$name] ?? [];
+            if (empty($props)) {
+                $parts[] = 'Proposed [none]';
+            } else {
+                $propStrs = [];
+                foreach ($props as $p) {
+                    $propStrs[] = "#{$p['label']}: {$p['team']} → {$p['status']}";
+                }
+                $parts[] = 'Proposed [' . implode('; ', $propStrs) . ']';
+            }
+
+            // Votes
+            $playerVotes = $votes[$name] ?? [];
+            $parts[] = 'Votes [' . (empty($playerVotes) ? 'none' : implode(', ', $playerVotes)) . ']';
+
+            $tracker .= "{$name}: " . implode(' | ', $parts) . "\n";
+        }
+
+        return $tracker;
+    }
+
+    /**
+     * Analyze vote patterns against mission outcomes to surface suspicious behavior.
+     */
+    private function buildVotePatternAnalysis(Game $game, \Illuminate\Support\Collection $events): string
+    {
+        $completedMissions = $events->where('event_type', 'mission_complete');
+        if ($completedMissions->isEmpty()) {
+            return '';
+        }
+
+        $analysis = '';
+
+        // For each completed mission, find the approved proposal's vote breakdown
+        foreach ($completedMissions as $missionEvent) {
+            $missionNum = $missionEvent->event_data['mission_number'] ?? null;
+            $missionSuccess = $missionEvent->event_data['success'] ?? null;
+            $missionTeam = $missionEvent->event_data['team'] ?? [];
+            if ($missionNum === null || $missionSuccess === null) {
+                continue;
+            }
+
+            // Find the APPROVED team_vote event that preceded this mission_complete
+            $approvedVote = $events
+                ->where('event_type', 'team_vote')
+                ->where('id', '<', $missionEvent->id)
+                ->filter(fn ($e) => ($e->event_data['approved'] ?? false) === true)
+                ->last();
+
+            if (!$approvedVote || empty($approvedVote->event_data['breakdown'])) {
+                continue;
+            }
+
+            $breakdown = $approvedVote->event_data['breakdown'];
+
+            if ($missionSuccess) {
+                // Mission SUCCEEDED — flag players who voted to REJECT the proposal
+                $rejecters = collect($breakdown)
+                    ->filter(fn ($v) => !$v['approved'])
+                    ->pluck('player')
+                    ->toArray();
+
+                foreach ($rejecters as $name) {
+                    $analysis .= "⚠️ {$name} voted to REJECT the team for Mission {$missionNum} which SUCCEEDED — why block a good team?\n";
+                }
+            } else {
+                // Mission FAILED — flag players who voted to APPROVE the proposal
+                $approvers = collect($breakdown)
+                    ->filter(fn ($v) => $v['approved'])
+                    ->pluck('player')
+                    ->toArray();
+
+                foreach ($approvers as $name) {
+                    // Only flag non-team-members as suspicious approvers (team members might just trust themselves)
+                    if (!in_array($name, $missionTeam)) {
+                        $analysis .= "⚠️ {$name} voted to APPROVE the team for Mission {$missionNum} which FAILED — they may have wanted evil on the team.\n";
+                    }
+                }
+            }
+        }
+
+        // Add mission deduction hints for failed missions
+        $failedMissions = $completedMissions->filter(fn ($e) => ($e->event_data['success'] ?? true) === false);
+        if ($failedMissions->isNotEmpty()) {
+            $allPlayers = $game->players->pluck('name')->toArray();
+            $successfulMissions = $completedMissions->filter(fn ($e) => ($e->event_data['success'] ?? false) === true);
+
+            // Players who were ONLY on successful missions are likely good
+            $onlySuccessPlayers = [];
+            $onFailedMission = [];
+            foreach ($allPlayers as $name) {
+                $wasOnFailed = $failedMissions->contains(fn ($e) => in_array($name, $e->event_data['team'] ?? []));
+                $wasOnSuccess = $successfulMissions->contains(fn ($e) => in_array($name, $e->event_data['team'] ?? []));
+                if ($wasOnFailed) {
+                    $onFailedMission[] = $name;
+                } elseif ($wasOnSuccess) {
+                    $onlySuccessPlayers[] = $name;
+                }
+            }
+
+            if (!empty($onlySuccessPlayers)) {
+                $analysis .= "✅ Players only on SUCCESSFUL missions (likely good): " . implode(', ', $onlySuccessPlayers) . "\n";
+            }
+
+            foreach ($failedMissions as $missionEvent) {
+                $team = $missionEvent->event_data['team'] ?? [];
+                $failVotes = $missionEvent->event_data['fail_votes'] ?? 0;
+                $missionNum = $missionEvent->event_data['mission_number'] ?? '?';
+                $goodOnTeam = count($team) - $failVotes;
+                if ($goodOnTeam > 0) {
+                    $analysis .= "📊 Mission {$missionNum} had {$failVotes} fail vote(s) among " . count($team) . " players (" . implode(', ', $team) . ") — {$goodOnTeam} of them are still GOOD. Not everyone on this team is evil.\n";
+                }
+            }
+        }
+
+        return $analysis;
     }
 
     public function checkPhaseTransition(Game $game): void
