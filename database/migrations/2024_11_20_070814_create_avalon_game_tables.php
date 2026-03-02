@@ -158,6 +158,7 @@ return new class extends Migration
                 'mission_complete',
                 'assassination',
                 'game_end',
+                'phase_start',
             ]);
             $table->foreignId('player_id')->nullable()
                 ->constrained()

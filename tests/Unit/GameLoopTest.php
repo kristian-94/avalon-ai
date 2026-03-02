@@ -772,15 +772,12 @@ class GameLoopTest extends TestCase
             $teamMember->update(['vote_success' => true]);
         }
 
-        // Process the mission result which should trigger assassination phase
+        // Process the mission result which should trigger evil_discussion phase
         $this->gameLoop->checkPhaseTransition($this->game->fresh());
 
-        // Assertions
+        // Assertions — should now be in evil_discussion, not assassination directly
         $this->game->refresh();
-        $this->assertEquals('assassination', $this->game->current_phase);
-        $this->assertNotEquals($oldLeaderId, $this->game->current_leader_id);
-        $assassin = $this->game->players()->where('role', 'assassin')->first();
-        $this->assertEquals($assassin->id, $this->game->current_leader_id);
+        $this->assertEquals('evil_discussion', $this->game->current_phase);
         $this->assertNull($this->game->winner);
 
         // Verify mission results
@@ -790,19 +787,38 @@ class GameLoopTest extends TestCase
         $this->assertEquals('fail', $mission4->fresh()->status);
         $this->assertEquals('success', $mission5->fresh()->status);
 
-        // Verify game messages for each player
+        // Verify game messages for each player reflect evil_discussion instructions
         foreach ($this->players as $player) {
             $playerMessages = $player->messages()->pluck('content')->toArray();
             $lastMessage = end($playerMessages);
 
-            if ($player->role === 'assassin') {
-                $this->assertStringContainsString('The good team has won 3 missions. As the Assassin, you must now identify Merlin', $lastMessage);
+            if (in_array($player->role, ['assassin', 'minion'])) {
+                $this->assertStringContainsString('Good has won 3 missions', $lastMessage);
+                $this->assertStringContainsString('evil partner', $lastMessage);
             } elseif ($player->role === 'merlin') {
-                $this->assertStringContainsString('The Assassination phase has begun. The Assassin will try to identify you', $lastMessage);
+                $this->assertStringContainsString('Good has won 3 missions', $lastMessage);
             } else {
-                $this->assertStringContainsString('The Assassination phase has begun. The Assassin will try to identify Merlin', $lastMessage);
+                $this->assertStringContainsString('Good has won 3 missions', $lastMessage);
             }
         }
+
+        // Now simulate evil players speaking to trigger transition to assassination
+        $evilPlayers = $this->game->players()->whereIn('role', ['assassin', 'minion'])->get();
+        foreach ($evilPlayers as $evilPlayer) {
+            \App\Models\Message::create([
+                'game_id' => $this->game->id,
+                'player_id' => $evilPlayer->id,
+                'message_type' => 'public_chat',
+                'content' => 'I think it might be player X.',
+            ]);
+        }
+
+        $this->gameLoop->checkPhaseTransition($this->game->fresh());
+
+        $this->game->refresh();
+        $this->assertEquals('assassination', $this->game->current_phase);
+        $assassin = $this->game->players()->where('role', 'assassin')->first();
+        $this->assertEquals($assassin->id, $this->game->current_leader_id);
 
         Event::assertDispatched(GameStateUpdate::class);
     }
@@ -849,7 +865,7 @@ class GameLoopTest extends TestCase
 
             // Optional: Add assertions about valid state transitions
             if (! $gameEnded) {
-                $this->assertContains($this->game->current_phase, ['team_proposal', 'team_voting', 'mission', 'assassination']);
+                $this->assertContains($this->game->current_phase, ['team_proposal', 'team_voting', 'mission', 'evil_discussion', 'assassination']);
                 if ($this->game->currentMission) {
                     $this->assertGreaterThanOrEqual(1, $this->game->currentMission->mission_number);
                     $this->assertLessThanOrEqual(5, $this->game->currentMission->mission_number);
@@ -951,7 +967,7 @@ class GameLoopTest extends TestCase
 
             if (! $gameEnded) {
                 $this->assertContains($this->game->current_phase,
-                    ['team_proposal', 'team_voting', 'mission', 'assassination']);
+                    ['team_proposal', 'team_voting', 'mission', 'evil_discussion', 'assassination']);
 
                 if ($this->game->currentMission) {
                     $this->assertGreaterThanOrEqual(1, $this->game->currentMission->mission_number);

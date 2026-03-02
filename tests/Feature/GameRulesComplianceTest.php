@@ -379,8 +379,8 @@ class GameRulesComplianceTest extends TestCase
         $gameLoop->checkPhaseTransition($game->fresh());
 
         $game->refresh();
-        $this->assertEquals('assassination', $game->current_phase); // Should trigger assassination phase
-        
+        $this->assertEquals('evil_discussion', $game->current_phase); // Should trigger evil discussion before assassination
+
         // Count successful missions
         $successCount = $game->missions()->where('status', 'success')->count();
         $this->assertEquals(3, $successCount);

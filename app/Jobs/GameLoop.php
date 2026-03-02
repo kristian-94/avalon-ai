@@ -37,11 +37,12 @@ class GameLoop implements ShouldQueue
     
     // Phase timeout settings (in seconds)
     private $phaseTimeouts = [
-        'setup' => 300,         // 5 minutes for initial introductions
-        'team_proposal' => 180, // 3 minutes to propose a team
-        'team_voting' => 120,   // 2 minutes for everyone to vote
-        'mission' => 120,       // 2 minutes for mission execution
-        'assassination' => 180, // 3 minutes for assassination
+        'setup' => 300,            // 5 minutes for initial introductions
+        'team_proposal' => 180,    // 3 minutes to propose a team
+        'team_voting' => 120,      // 2 minutes for everyone to vote
+        'mission' => 120,          // 2 minutes for mission execution
+        'evil_discussion' => 120,  // 2 minutes for evil team to discuss Merlin
+        'assassination' => 180,    // 3 minutes for assassination
     ];
 
     public function handle(): void
@@ -258,6 +259,26 @@ class GameLoop implements ShouldQueue
                 ->get()
                 ->pluck('player')
                 ->all(),
+
+            'evil_discussion' => (function () use ($game) {
+                // All evil players who haven't spoken since the evil_discussion phase began
+                $phaseStartEvent = $game->gameEvents()
+                    ->where('event_type', 'phase_start')
+                    ->where('event_data->phase', 'evil_discussion')
+                    ->latest()
+                    ->first();
+                $since = $phaseStartEvent?->created_at ?? $game->started_at;
+
+                return $game->players()
+                    ->whereIn('role', ['assassin', 'minion'])
+                    ->where('is_human', false)
+                    ->whereDoesntHave('messages', function ($q) use ($since) {
+                        $q->where('message_type', 'public_chat')
+                            ->where('created_at', '>=', $since);
+                    })
+                    ->get()
+                    ->all();
+            })(),
 
             'assassination' => $game->players()->where('role', 'assassin')->get()->all(),
 
@@ -560,6 +581,11 @@ class GameLoop implements ShouldQueue
             if ($onMission && !$hasActed) {
                 $effectivePhase = 'mission_on_team';
             }
+        } elseif ($game->current_phase === 'evil_discussion') {
+            if (in_array($player->role, ['assassin', 'minion'])) {
+                $effectivePhase = 'evil_discussion_evil';
+            }
+            // good players see the default 'evil_discussion' phase (no action required)
         } elseif ($game->current_phase === 'assassination' && $player->role === 'assassin') {
             $effectivePhase = 'assassination_assassin';
         }
@@ -675,6 +701,40 @@ class GameLoop implements ShouldQueue
                     $summary .= "Evil on mission: " . implode(', ', $evilOnMission) . ". Recommendation: {$missionDecision}\n";
                 }
             }
+
+            if (in_array($game->current_phase, ['evil_discussion', 'assassination'])) {
+                $goodPlayers = $game->players->filter(fn ($p) => !in_array($p->role, ['assassin', 'minion']))->pluck('name')->values()->all();
+                $summary .= "\n🎯 MERLIN HUNT: The good players who could be Merlin are: " . implode(', ', $goodPlayers) . ".\n";
+                $summary .= "Merlin knows who is evil and has been guiding the good team all game. Look for players who:\n";
+                $summary .= "  - Voted against proposals that included you or your partner\n";
+                $summary .= "  - Seemed to know who was trustworthy without obvious reasons\n";
+                $summary .= "  - Made accurate reads early, before evidence was clear\n";
+                $summary .= "  - Steered the team away from evil players multiple times\n";
+                if ($game->current_phase === 'evil_discussion') {
+                    $summary .= "Discuss with your evil partner who you think Merlin is. Share your reasoning — the Assassin will make the final call.\n";
+                } else {
+                    // assassination phase — include partner's last discussion message if available
+                    $phaseStartEvent = $game->gameEvents()
+                        ->where('event_type', 'phase_start')
+                        ->where('event_data->phase', 'evil_discussion')
+                        ->latest()
+                        ->first();
+                    if ($phaseStartEvent) {
+                        $partnerMessages = $game->messages()
+                            ->whereHas('player', fn ($q) => $q->whereIn('role', ['assassin', 'minion'])->where('id', '!=', $player->id))
+                            ->where('message_type', 'public_chat')
+                            ->where('created_at', '>', $phaseStartEvent->created_at)
+                            ->get();
+                        if ($partnerMessages->isNotEmpty()) {
+                            $summary .= "Your evil partner(s) said during the discussion:\n";
+                            foreach ($partnerMessages as $msg) {
+                                $summary .= "  {$msg->player->name}: \"{$msg->content}\"\n";
+                            }
+                        }
+                    }
+                    $summary .= "Now make your final decision — name the player you believe is Merlin.\n";
+                }
+            }
             $summary .= "============================\n";
         }
 
@@ -727,6 +787,13 @@ class GameLoop implements ShouldQueue
                     }
                 } else {
                     $summary .= "The mission team is executing their mission. Discuss and observe.\n";
+                }
+                break;
+            case 'evil_discussion':
+                if (in_array($player->role, ['assassin', 'minion'])) {
+                    $summary .= "Discuss with your evil partner who you think Merlin is. Share your best read on who Merlin might be — name a specific suspect and your reasoning. Speak in character as if puzzling it out publicly.\n";
+                } else {
+                    $summary .= "The evil team is conferring before the assassination. You may try to mislead them or stay quiet.\n";
                 }
                 break;
             case 'assassination':
@@ -1023,6 +1090,7 @@ class GameLoop implements ShouldQueue
             'team_proposal' => $this->shouldTransitionFromTeamProposal($game),
             'team_voting' => $this->shouldTransitionFromTeamVoting($game),
             'mission' => $this->shouldTransitionFromMission($game),
+            'evil_discussion' => $this->shouldTransitionFromEvilDiscussion($game),
             'assassination' => $game->gameEvents()->where('event_type', 'assassination')->exists(),
             'debrief' => $this->shouldTransitionFromDebrief($game),
             default => false
@@ -1103,6 +1171,31 @@ class GameLoop implements ShouldQueue
         return $teamSize > 0 && $submittedVotes >= $teamSize;
     }
 
+    private function shouldTransitionFromEvilDiscussion(Game $game): bool
+    {
+        // Transition once all evil AI players have spoken at least once since the phase began
+        $phaseStartEvent = $game->gameEvents()
+            ->where('event_type', 'phase_start')
+            ->where('event_data->phase', 'evil_discussion')
+            ->latest()
+            ->first();
+        $since = $phaseStartEvent?->created_at ?? $game->started_at;
+
+        $evilAiCount = $game->players()
+            ->whereIn('role', ['assassin', 'minion'])
+            ->where('is_human', false)
+            ->count();
+
+        $evilAiSpoken = $game->messages()
+            ->where('message_type', 'public_chat')
+            ->where('created_at', '>=', $since)
+            ->whereHas('player', fn ($q) => $q->whereIn('role', ['assassin', 'minion'])->where('is_human', false))
+            ->distinct('player_id')
+            ->count();
+
+        return $evilAiSpoken >= $evilAiCount;
+    }
+
     private function shouldTransitionFromDebrief(Game $game): bool
     {
         return false; // Debrief runs indefinitely — players can keep chatting after the game
@@ -1117,6 +1210,7 @@ class GameLoop implements ShouldQueue
             'setup', 'mission' => 'team_proposal',
             'team_proposal' => 'team_voting',
             'team_voting' => $this->determineNextPhaseAfterVoting($game),
+            'evil_discussion' => 'assassination',
             'assassination' => 'debrief',
             'debrief' => 'finished',
             default => $game->current_phase
@@ -1210,6 +1304,15 @@ class GameLoop implements ShouldQueue
                 return;
             }
 
+            if ($previousPhase === 'evil_discussion') {
+                // Hand off to the assassin for the final decision
+                $assassin = $game->players()->where('role', 'assassin')->first();
+                if ($assassin) {
+                    $game->current_leader_id = $assassin->id;
+                    $game->save();
+                }
+            }
+
             if ($previousPhase === 'team_proposal') {
                 $proposalid = $game->current_proposal_id;
                 $proposal = MissionProposal::find($proposalid); // Get the current proposal directly, don't use relation because it's out of date.
@@ -1249,12 +1352,15 @@ class GameLoop implements ShouldQueue
                     $successfulMissions = $game->missions()->where('status', 'success')->count();
 
                     if ($successfulMissions >= 3) {
-                        $game->current_phase = 'assassination';
-
-                        // Set leader to assassin
-                        $assassin = $game->players()->where('role', 'assassin')->first();
-                        $game->current_leader_id = $assassin->id;
+                        $game->current_phase = 'evil_discussion';
                         $game->save();
+
+                        // Log phase_start so we can anchor the discussion window
+                        GameEvent::create([
+                            'game_id' => $game->id,
+                            'event_type' => 'phase_start',
+                            'event_data' => ['phase' => 'evil_discussion'],
+                        ]);
                     }
                 }
 
@@ -1308,6 +1414,7 @@ class GameLoop implements ShouldQueue
             'team_proposal' => 'Team Proposal',
             'team_voting' => 'Team Voting',
             'mission' => 'Mission',
+            'evil_discussion' => 'Evil Discussion',
             'assassination' => 'Assassination',
             default => 'Unknown'
         };
@@ -1409,6 +1516,12 @@ class GameLoop implements ShouldQueue
                     ? 'As a good player, you should support the mission.'
                     : 'As an evil player, you can choose to sabotage the mission.')
                 : 'The mission team will now attempt to complete their mission.',
+
+            'evil_discussion' => match (true) {
+                in_array($player->role, ['assassin', 'minion']) => 'Good has won 3 missions. Before the Assassin strikes, confer with your evil partner — share who you think Merlin is and why. The Assassin will make the final call.',
+                $player->role === 'merlin' => 'Good has won 3 missions. The evil team is now conferring before the assassination attempt. Stay calm and do not give yourself away.',
+                default => 'Good has won 3 missions. The evil team is conferring before the assassination attempt.',
+            },
 
             'assassination' => match ($player->role) {
                 'assassin' => 'The good team has won 3 missions. As the Assassin, you must now identify Merlin',
@@ -1553,6 +1666,33 @@ class GameLoop implements ShouldQueue
                 }
                 break;
                 
+            case 'evil_discussion':
+                // Force any evil AI players who haven't spoken to emit a placeholder message
+                $phaseStartEvent = $game->gameEvents()
+                    ->where('event_type', 'phase_start')
+                    ->where('event_data->phase', 'evil_discussion')
+                    ->latest()
+                    ->first();
+                $since = $phaseStartEvent?->created_at ?? $game->started_at;
+
+                $silentEvil = $game->players()
+                    ->whereIn('role', ['assassin', 'minion'])
+                    ->where('is_human', false)
+                    ->whereDoesntHave('messages', function ($q) use ($since) {
+                        $q->where('message_type', 'public_chat')->where('created_at', '>', $since);
+                    })
+                    ->get();
+
+                foreach ($silentEvil as $evilPlayer) {
+                    Message::create([
+                        'game_id' => $game->id,
+                        'player_id' => $evilPlayer->id,
+                        'message_type' => 'public_chat',
+                        'content' => "Hard to say... could be anyone. [Timed out]",
+                    ]);
+                }
+                break;
+
             case 'assassination':
                 // Force random assassination
                 $assassin = $game->players()->where('role', 'assassin')->first();

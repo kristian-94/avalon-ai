@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 
 class GroqService implements AgentService
 {
+    use AgentResponseSchema;
     private string $apiKey;
 
     private string $model;
@@ -48,7 +49,7 @@ class GroqService implements AgentService
                     ],
                     'reasoning_effort' => env('AI_REASONING_EFFORT') ?: null,
                     'temperature' => 0.7,
-                    'max_tokens' => 300,
+                    'max_tokens' => 500,
                 ]));
 
             Log::info('Groq raw response', [
@@ -111,84 +112,4 @@ class GroqService implements AgentService
         ];
     }
 
-    private function extractCurrentPhase(array $messages): string
-    {
-        foreach (array_reverse($messages) as $message) {
-            if ($message['role'] === 'system' && str_contains($message['content'], 'Phase:')) {
-                if (preg_match('/Phase:\s*(\w+)/', $message['content'], $matches)) {
-                    return $matches[1];
-                }
-            }
-        }
-
-        return 'unknown';
-    }
-
-    private function getPhaseSpecificParameters(string $phase): array
-    {
-        $baseProperties = [
-            'message' => [
-                'type' => 'string',
-                'description' => 'Your in-character dialogue for the public chat. Stay in your personality voice. Do NOT narrate your vote or game action (the game shows that automatically). Say WHY you feel the way you do. Keep it to 1 sentence, max 2. If you have nothing NEW to add, return empty string "". Silence is fine and often better than repeating yourself.',
-            ],
-            'reasoning' => [
-                'type' => 'string',
-                'description' => 'Private internal reasoning — your true thoughts and strategy, not visible to others',
-            ],
-        ];
-
-        $required = ['reasoning'];
-
-        switch ($phase) {
-            case 'team_proposal_leader':
-                $baseProperties['team_proposal'] = [
-                    'type' => 'string',
-                    'description' => 'Comma-separated list of player names for the team proposal. Example: "Max,Riley". You MUST propose a team now.',
-                ];
-                $required[] = 'team_proposal';
-                break;
-
-            case 'team_proposal':
-                break;
-
-            case 'team_voting':
-                $baseProperties['vote'] = [
-                    'type' => 'boolean',
-                    'description' => 'Your vote on the proposed team. true = approve, false = reject',
-                ];
-                $required[] = 'vote';
-                break;
-
-            case 'team_voting_voted':
-                break;
-
-            case 'mission_on_team':
-                $baseProperties['mission_action'] = [
-                    'type' => 'boolean',
-                    'description' => 'Your mission action. true = success, false = fail (evil only). You MUST choose now.',
-                ];
-                $required[] = 'mission_action';
-                break;
-
-            case 'mission':
-                break;
-
-            case 'assassination_assassin':
-                $baseProperties['assassination_target'] = [
-                    'type' => 'string',
-                    'description' => 'The name of the player you believe is Merlin. You MUST choose a target now.',
-                ];
-                $required[] = 'assassination_target';
-                break;
-
-            case 'assassination':
-                break;
-        }
-
-        return [
-            'type' => 'object',
-            'properties' => $baseProperties,
-            'required' => $required,
-        ];
-    }
 }

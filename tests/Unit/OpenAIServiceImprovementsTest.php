@@ -77,7 +77,7 @@ class OpenAIServiceImprovementsTest extends TestCase
 
         // Leader MUST propose a team
         $this->assertContains('team_proposal', $params['required']);
-        $this->assertStringContainsString('MUST propose', $params['properties']['team_proposal']['description']);
+        $this->assertStringContainsString('reasoning', $params['properties']['team_proposal']['description']);
     }
 
     public function test_get_phase_specific_parameters_for_team_voting()
@@ -113,7 +113,7 @@ class OpenAIServiceImprovementsTest extends TestCase
 
         // Team member MUST submit mission action
         $this->assertContains('mission_action', $params['required']);
-        $this->assertStringContainsString('MUST choose', $params['properties']['mission_action']['description']);
+        $this->assertStringContainsString('reasoning', $params['properties']['mission_action']['description']);
     }
 
     public function test_get_phase_specific_parameters_for_assassination_non_assassin()
@@ -135,7 +135,7 @@ class OpenAIServiceImprovementsTest extends TestCase
 
         // Assassin MUST choose a target
         $this->assertContains('assassination_target', $params['required']);
-        $this->assertStringContainsString('MUST choose', $params['properties']['assassination_target']['description']);
+        $this->assertStringContainsString('reasoning', $params['properties']['assassination_target']['description']);
     }
 
     public function test_get_phase_specific_parameters_for_unknown_phase()
