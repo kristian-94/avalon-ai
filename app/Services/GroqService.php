@@ -40,7 +40,7 @@ class GroqService implements AgentService
                         'function' => [
                             'name' => 'game_response',
                             'description' => 'Respond to the current game situation',
-                            'parameters' => $this->getPhaseSpecificParameters($currentPhase),
+                            'parameters' => $this->getPhaseSpecificParameters($currentPhase, $messages),
                         ],
                     ]],
                     'tool_choice' => [

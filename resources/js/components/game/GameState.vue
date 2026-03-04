@@ -58,6 +58,9 @@
         <div v-if="gameState?.currentPhase === 'team_proposal'" class="mt-2 text-white/80">
           Waiting for team leader {{ currentLeaderName }} to propose {{ requiredPlayerCount }} players
         </div>
+        <div v-else-if="gameState?.currentPhase === 'team_discussion'" class="mt-2 text-white/80">
+          Open discussion — {{ currentLeaderName }} will propose {{ requiredPlayerCount }} players
+        </div>
         <div v-else-if="gameState?.currentPhase === 'team_voting'" class="mt-2 text-white/80">
           Team proposed: {{ playersProposed }}
         </div>
@@ -104,6 +107,7 @@ const props = defineProps<{
 
 
 const phases = [
+  {id: 'team_discussion', label: 'Discuss'},
   {id: 'team_proposal', label: 'Propose Team'},
   {id: 'team_voting', label: 'Vote Team'},
   {id: 'mission', label: 'Mission'}, // quick phase of just getting a vote, no discussions.

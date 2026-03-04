@@ -17,7 +17,19 @@ trait AgentResponseSchema
         return 'unknown';
     }
 
-    private function getPhaseSpecificParameters(string $phase): array
+    private function extractGoodPlayerNames(array $messages): array
+    {
+        foreach (array_reverse($messages) as $message) {
+            if ($message['role'] === 'system' && str_contains($message['content'], 'MERLIN HUNT')) {
+                if (preg_match('/good players who could be Merlin are:\s*([^\n]+)/', $message['content'], $matches)) {
+                    return array_map(fn($n) => trim($n, " \t\n\r\0\x0B."), explode(',', $matches[1]));
+                }
+            }
+        }
+        return [];
+    }
+
+    private function getPhaseSpecificParameters(string $phase, array $messages = []): array
     {
         $baseProperties = [
             'reasoning' => [
@@ -58,15 +70,21 @@ trait AgentResponseSchema
                     'type' => 'boolean',
                     'description' => 'Your mission vote: true = success, false = fail. Evil players may choose fail to sabotage. Must match your reasoning above.',
                 ];
+                $baseProperties['message']['description'] = 'Your in-character public chat while on the mission. Talk about confidence in the team, nerves, or nothing. Do NOT hint at how you voted — mission votes are secret. Return empty string "" if you have nothing to say.';
                 $required[] = 'mission_action';
                 break;
 
             case 'assassination_assassin':
-                $baseProperties['message']['description'] = 'You already spoke during the evil discussion. Your message here should be a brief final declaration (e.g. "I\'m going with [name].") — or empty string "" if you have nothing new to add. Do NOT repeat what you said in the evil discussion.';
-                $baseProperties['assassination_target'] = [
+                $baseProperties['message']['description'] = 'Your in-character final declaration. State your choice: e.g. "I\'m going with [name]." Your message MUST name the same player as assassination_target — do not name one person in chat and target another. Keep it brief or return empty string "" if you have nothing to add.';
+                $goodNames = $this->extractGoodPlayerNames($messages);
+                $targetField = [
                     'type' => 'string',
                     'description' => 'The player name you believe is Merlin. Think carefully in your reasoning above — who has been making suspiciously accurate reads? Who steered the team most effectively? This field must match your final decision.',
                 ];
+                if (!empty($goodNames)) {
+                    $targetField['enum'] = $goodNames;
+                }
+                $baseProperties['assassination_target'] = $targetField;
                 $required[] = 'assassination_target';
                 break;
         }

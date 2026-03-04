@@ -10,9 +10,11 @@
           ? 'ring-4 ring-green-400 shadow-lg shadow-green-500/40'
           : isProposed(player.player_index)
             ? 'ring-4 ring-blue-400 shadow-lg shadow-blue-500/30'
-            : player.id === currentLeader
-              ? 'ring-2 ring-yellow-500/50'
-              : '',
+            : isAssassinationPhase && isEvilPlayer(player)
+              ? 'ring-4 ring-red-500 shadow-lg shadow-red-500/40'
+              : !isAssassinationPhase && player.id === currentLeader
+                ? 'ring-2 ring-yellow-500/50'
+                : '',
       ]"
     >
       <!-- Avatar -->
@@ -24,10 +26,16 @@
         />
         <!-- Status icons overlaid on avatar -->
         <div class="absolute -top-1 -right-1 flex flex-col gap-1">
-          <div v-if="player.id === currentLeader" class="relative group/tip">
+          <div v-if="!isAssassinationPhase && player.id === currentLeader" class="relative group/tip">
             <div class="text-yellow-500 text-lg cursor-default drop-shadow-lg">👑</div>
             <div class="absolute bottom-full right-0 mb-1.5 px-2 py-1 bg-black/90 border border-yellow-500/30 text-yellow-200 text-xs rounded whitespace-nowrap invisible group-hover/tip:visible opacity-0 group-hover/tip:opacity-100 transition-opacity z-20 pointer-events-none">
               Current Leader — proposes the mission team
+            </div>
+          </div>
+          <div v-if="isAssassinationPhase && isAssassin(player)" class="relative group/tip">
+            <div class="text-red-400 text-lg cursor-default drop-shadow-lg">🗡️</div>
+            <div class="absolute bottom-full right-0 mb-1.5 px-2 py-1 bg-black/90 border border-red-500/30 text-red-200 text-xs rounded whitespace-nowrap invisible group-hover/tip:visible opacity-0 group-hover/tip:opacity-100 transition-opacity z-20 pointer-events-none">
+              Assassin — choosing a target
             </div>
           </div>
           <div v-if="isProposed(player.player_index)" class="relative group/tip">
@@ -142,5 +150,18 @@ const isProposed = (playerIndex: number) => {
 const isOnMission = (playerIndex: number) => {
   if (props.gameState?.currentPhase !== 'mission') return false
   return props.gameState?.currentMission?.playerIndexes?.includes(playerIndex) ?? false
+}
+
+const isAssassinationPhase = computed(() => {
+  const phase = props.gameState?.currentPhase
+  return phase === 'assassination' || phase === 'evil_discussion'
+})
+
+const isEvilPlayer = (player: Player) => {
+  return player.role === 'assassin' || player.role === 'minion' || player.knownEvil === true
+}
+
+const isAssassin = (player: Player) => {
+  return player.role === 'assassin'
 }
 </script>

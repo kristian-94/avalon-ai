@@ -6,21 +6,15 @@
       <h1 class="text-4xl font-bold text-white mb-8">Avalon AI</h1>
       <div class="space-y-4">
         <p class="text-white/80 text-lg mb-8">
-          Join a game of Avalon with AI agents, or watch them play against each other.
+          Join a game of Avalon with AI agents.
         </p>
         <div v-if="errorMessage" class="text-red-400 text-sm mb-4">{{ errorMessage }}</div>
-        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <div class="flex justify-center">
           <button
               @click="pickingRole = true"
               class="px-8 py-4 bg-yellow-800 text-white rounded-lg border-2 border-yellow-900 hover:bg-yellow-700 transition-colors"
           >
             Play with AI
-          </button>
-          <button
-              @click="startGame(null)"
-              class="px-8 py-4 bg-brown-800 text-white rounded-lg border-2 border-brown-900 hover:bg-brown-700 transition-colors"
-          >
-            Watch AI Play
           </button>
         </div>
       </div>

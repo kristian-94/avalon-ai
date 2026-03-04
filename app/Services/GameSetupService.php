@@ -51,7 +51,7 @@ CORE STRATEGY:
 - Urgency: The closer good is to winning, the more aggressively you must push to get evil on teams.
 - At game end: Identify Merlin for the assassination. Watch who seems to know too much — Merlin will steer good teams and make accurate reads without obvious reason.
 
-COVER STORY: Act like a good player. Cast suspicion on good players, question proposals that exclude you, appear frustrated when missions fail. Never acknowledge you are evil.
+COVER STORY: Act like a good player. Before committing to a message, ask yourself: "If I were genuinely good and had no idea who was evil, would I actually say this?" If the answer is no — if your message would look strange, suspicious, or self-serving to someone watching — rewrite it. Good players argue from evidence; they don\'t advocate for specific people without reasoning.
 
 CRITICAL — PUBLIC CHAT RULES: Your `message` field is your in-character voice. It must be consistent with the action you just took and the reasoning you just wrote. You are playing a good player who has no idea who is evil — so speak from that perspective authentically.
 - Your message must match your action. If you voted NO, your message should explain your suspicion of someone on that team. If you are assassinating someone, your message should name or hint at the target you chose — do NOT say you suspect person A and then assassinate person B.
@@ -68,7 +68,7 @@ CORE STRATEGY:
 - Mission action: Vote FAIL when you are on a mission. Consider voting SUCCESS on an early mission if you need to build credibility.
 - Urgency: When good is close to winning, you MUST reject all-good proposals even if it looks suspicious.
 
-COVER STORY: Appear as a good player. When you reject a proposal, frame it as concern about team composition. Never admit you are evil.
+COVER STORY: Appear as a good player. Before committing to a message, ask yourself: "If I were genuinely good and had no idea who was evil, would I actually say this?" If the answer is no — if your message would look strange, suspicious, or self-serving to someone watching — rewrite it. Good players argue from evidence; they don\'t advocate for specific people without reasoning.
 
 CRITICAL — PUBLIC CHAT RULES: Your `message` field is your in-character voice. It must be consistent with the action you just took and the reasoning you just wrote. You are playing a good player who has no idea who is evil — so speak from that perspective authentically.
 - Your message must match your action. If you voted NO, your message should explain your suspicion of someone on that team. If you voted YES, your message should sound like a reasonable good player approving a team.
@@ -177,7 +177,7 @@ CORE STRATEGY:
                         "\n\nNOTE: In Avalon, it is completely normal and expected for the leader to include themselves on their own team proposal. Since you can always trust yourself, putting yourself on the team is the default smart play — do NOT treat self-inclusion as suspicious.".
                         "\n\nHOW TO PLAY WELL: You are a rational, calculating player. You KNOW your own role with certainty — never suspect yourself or vote against a team just because you were on a failed mission. If a mission you were on failed, the traitor was one of your OTHER teammates, not you. Always base your decisions on evidence from the game record — voting patterns, mission results, who was on failed missions, and who voted for/against which proposals. Track all rounds, not just the most recent one. When a mission fails, the evil player MUST be one of the OTHER team members — use this to narrow down suspects. When you speak, cite the specific evidence behind your read. Never make claims about a player that aren't backed by what actually happened in the game.".
                         "\n\nRespond in JSON format according to the provided function schema.".
-                        "\n\nIMPORTANT: Keep your messages SHORT — 1 sentence, max 2 if you really have something to say. Stay in character with your personality at all times. Do not write long paragraphs. If you have nothing new to add, say nothing.".
+                        "\n\nIMPORTANT: Keep your messages SHORT — 1 sentence, max 2 if you really have something to say. Stay in character with your personality at all times. Do not write long paragraphs. If you have nothing new to add that you haven\'t already said, leave `message` empty or null — do not repeat yourself or rephrase a point you already made.".
                         "\n\nThe game is about to begin. Remember your role and act accordingly.";
 
                     Message::create([

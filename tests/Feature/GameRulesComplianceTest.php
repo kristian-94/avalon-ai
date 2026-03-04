@@ -68,9 +68,9 @@ class GameRulesComplianceTest extends TestCase
 
         $game->update(['current_proposal_id' => $proposal->id]);
         
-        // The game should transition to voting
+        // The game should transition to team_voting (discussion already happened before proposal)
         $gameLoop->checkPhaseTransition($game->fresh());
-        
+
         $game->refresh();
         $this->assertEquals('team_voting', $game->current_phase); // Should move to voting phase
         $this->assertEquals('pending', $proposal->fresh()->status); // Proposal should remain pending until voted on

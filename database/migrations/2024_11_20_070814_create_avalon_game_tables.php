@@ -18,6 +18,7 @@ return new class extends Migration
             $table->enum('current_phase', [
                 'setup',
                 'team_proposal',
+                'team_discussion',
                 'team_voting',
                 'mission',
                 'finished',

@@ -40,7 +40,7 @@ class OpenAIService implements AgentService
                     'functions' => [[
                         'name' => 'game_response',
                         'description' => 'Respond to the current game situation',
-                        'parameters' => $this->getPhaseSpecificParameters($currentPhase),
+                        'parameters' => $this->getPhaseSpecificParameters($currentPhase, $messages),
                     ]],
                     'function_call' => ['name' => 'game_response'],
                     'temperature' => 0.7,

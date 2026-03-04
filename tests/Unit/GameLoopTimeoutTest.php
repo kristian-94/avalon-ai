@@ -163,7 +163,14 @@ class GameLoopTimeoutTest extends TestCase
 
         $this->game->update(['current_proposal_id' => $proposal->id]);
 
-        // Have one player vote
+        // Leader auto-votes approve when submitting proposal (mirroring production behaviour)
+        MissionProposalVote::create([
+            'proposal_id' => $proposal->id,
+            'player_id' => $this->players[0]->id,
+            'approved' => true,
+        ]);
+
+        // Have one other player vote
         MissionProposalVote::create([
             'proposal_id' => $proposal->id,
             'player_id' => $this->players[1]->id,
@@ -176,9 +183,9 @@ class GameLoopTimeoutTest extends TestCase
         // Force transition
         $this->invokeMethod($this->gameLoop, 'forcePhaseTransition', [$this->game->fresh()]);
 
-        // Verify all non-leader players have voted
+        // Verify all players have voted (leader + player[1] already voted, rest forced)
         $totalVotes = MissionProposalVote::where('proposal_id', $proposal->id)->count();
-        $this->assertEquals(4, $totalVotes); // All non-leader players
+        $this->assertEquals(5, $totalVotes); // All players
 
         // Check forced votes are rejections
         $forcedVotes = MissionProposalVote::where('proposal_id', $proposal->id)

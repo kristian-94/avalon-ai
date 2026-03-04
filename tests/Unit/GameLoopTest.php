@@ -82,7 +82,7 @@ class GameLoopTest extends TestCase
         $this->gameLoop = new GameLoop($this->game->id);
     }
 
-    public function test_phase_transition_from_setup_to_team_proposal()
+    public function test_phase_transition_from_setup_to_team_discussion()
     {
         $this->assertFalse($this->gameLoop->shouldTransitionFromSetup($this->game));
 
@@ -100,29 +100,23 @@ class GameLoopTest extends TestCase
         $this->gameLoop->checkPhaseTransition($this->game->fresh());
 
         $this->game->refresh();
-        $this->assertEquals('team_proposal', $this->game->current_phase);
+        $this->assertEquals('team_discussion', $this->game->current_phase);
 
-        // Verify transition messages were created for all players
+        // Verify transition context messages were created for all players
         foreach ($this->players as $player) {
             $this->assertDatabaseHas('messages', [
                 'game_id' => $this->game->id,
                 'player_id' => $player->id,
                 'message_type' => 'game_event',
-                'content' => 'Initial introductions are complete. The game is now moving to the team proposal phase.',
+                'content' => 'Initial introductions are complete. Open discussion begins — talk strategy, share suspicions, and try to influence who the leader picks for the mission.',
             ]);
-
-            // Verify each player got appropriate instructions
-            $isLeader = $this->game->current_leader_id === $player->id;
-            if ($isLeader) {
-                $this->assertDatabaseHas('messages', [
-                    'game_id' => $this->game->id,
-                    'player_id' => $player->id,
-                    'message_type' => 'game_event',
-                    'content' => 'You are the leader for this round. You need to propose a team of '.
-                        $this->game->currentMission->required_players.' players for the mission. Who do you trust?',
-                ]);
-            }
         }
+
+        // Verify phase_start event was logged
+        $this->assertDatabaseHas('game_events', [
+            'game_id' => $this->game->id,
+            'event_type' => 'phase_start',
+        ]);
 
         Event::assertDispatched(GameStateUpdate::class);
     }
@@ -211,9 +205,32 @@ class GameLoopTest extends TestCase
                 'game_id' => $this->game->id,
                 'player_id' => $player->id,
                 'message_type' => 'game_event',
-                'content' => 'The team has been proposed and now needs to be voted on.',
+                'content' => 'A team has been proposed. It is now time to vote.',
             ]);
         }
+
+        Event::assertDispatched(GameStateUpdate::class);
+    }
+
+    public function test_phase_transition_from_team_discussion_to_team_proposal()
+    {
+        // team_discussion (pre-proposal) only advances via the 30s timeout.
+        // checkPhaseTransition always returns false; timeout calls transitionToNextPhase.
+        $this->game->update([
+            'current_phase' => 'team_discussion',
+            'current_leader_id' => $this->players[0]->id,
+        ]);
+
+        // No proposal yet — discussion happens before the leader picks a team
+        // checkPhaseTransition should NOT advance
+        $this->gameLoop->checkPhaseTransition($this->game->fresh());
+        $this->game->refresh();
+        $this->assertEquals('team_discussion', $this->game->current_phase);
+
+        // transitionToNextPhase (called by forcePhaseTransition on timeout) should advance to team_proposal
+        $this->gameLoop->transitionToNextPhase($this->game->fresh());
+        $this->game->refresh();
+        $this->assertEquals('team_proposal', $this->game->current_phase);
 
         Event::assertDispatched(GameStateUpdate::class);
     }
@@ -378,7 +395,7 @@ class GameLoopTest extends TestCase
         // Verify transition
 
         $this->game->refresh();
-        $this->assertEquals('team_proposal', $this->game->current_phase);
+        $this->assertEquals('team_discussion', $this->game->current_phase);
         $this->assertNotNull($this->game->current_leader_id);
         $this->assertNotEquals($oldLeaderId, $this->game->current_leader_id);
 
@@ -831,6 +848,7 @@ class GameLoopTest extends TestCase
         $turnCount = 0;
         $gameEnded = false;
         $game = $this->game;
+        $turnsInProposalPhase = 0;
 
         $this->assertNotNull($this->game->currentLeader());
 
@@ -855,6 +873,24 @@ class GameLoopTest extends TestCase
                 $this->assertIsString($game->currentLeader->name);
             }
             $this->gameLoop->checkPhaseTransition($game);
+            // team_discussion only advances via timeout; simulate that in tests
+            // by forcing transition once all eligible players have spoken.
+            $game->refresh();
+            if ($game->current_phase === 'team_discussion' && empty($this->gameLoop->getEligiblePlayers($game))) {
+                $this->gameLoop->transitionToNextPhase($game);
+            }
+            // team_proposal: mock always returns 2 players, so missions requiring 3+ players
+            // will have the proposal silently skipped. Force transition after 1 stuck turn.
+            $game->refresh();
+            if ($game->current_phase === 'team_proposal') {
+                $turnsInProposalPhase++;
+                if ($turnsInProposalPhase > 1 && $game->current_proposal_id === null) {
+                    $this->gameLoop->forcePhaseTransition($game);
+                    $turnsInProposalPhase = 0;
+                }
+            } else {
+                $turnsInProposalPhase = 0;
+            }
             // Finished game loop.
 
             // Refresh game state
@@ -865,7 +901,7 @@ class GameLoopTest extends TestCase
 
             // Optional: Add assertions about valid state transitions
             if (! $gameEnded) {
-                $this->assertContains($this->game->current_phase, ['team_proposal', 'team_voting', 'mission', 'evil_discussion', 'assassination']);
+                $this->assertContains($this->game->current_phase, ['team_proposal', 'team_discussion', 'team_voting', 'mission', 'evil_discussion', 'assassination']);
                 if ($this->game->currentMission) {
                     $this->assertGreaterThanOrEqual(1, $this->game->currentMission->mission_number);
                     $this->assertLessThanOrEqual(5, $this->game->currentMission->mission_number);
@@ -936,6 +972,7 @@ class GameLoopTest extends TestCase
         $turnCount = 0;
         $gameEnded = false;
         $game = $this->game;
+        $turnsInProposalPhase = 0;
 
         $this->assertNotNull($this->game->currentLeader());
 
@@ -946,7 +983,6 @@ class GameLoopTest extends TestCase
             $this->game->refresh();
             $currentPhase = $this->game->current_phase;
             $currentMission = $this->game->currentMission?->mission_number ?? 'None';
-            
 
             // Process game loop
             $eligiblePlayers = $this->gameLoop->getEligiblePlayers($game);
@@ -958,6 +994,23 @@ class GameLoopTest extends TestCase
 
             $game->refresh();
             $this->gameLoop->checkPhaseTransition($game);
+            // team_discussion only advances via timeout; simulate that in tests
+            $game->refresh();
+            if ($game->current_phase === 'team_discussion' && empty($this->gameLoop->getEligiblePlayers($game))) {
+                $this->gameLoop->transitionToNextPhase($game);
+            }
+            // team_proposal: mock always returns 2 players, so missions requiring 3+ players
+            // will have the proposal silently skipped. Force transition after 1 stuck turn.
+            $game->refresh();
+            if ($game->current_phase === 'team_proposal') {
+                $turnsInProposalPhase++;
+                if ($turnsInProposalPhase > 1 && $game->current_proposal_id === null) {
+                    $this->gameLoop->forcePhaseTransition($game);
+                    $turnsInProposalPhase = 0;
+                }
+            } else {
+                $turnsInProposalPhase = 0;
+            }
 
             // Refresh game state
             $this->game->refresh();
@@ -967,7 +1020,7 @@ class GameLoopTest extends TestCase
 
             if (! $gameEnded) {
                 $this->assertContains($this->game->current_phase,
-                    ['team_proposal', 'team_voting', 'mission', 'evil_discussion', 'assassination']);
+                    ['team_proposal', 'team_discussion', 'team_voting', 'mission', 'evil_discussion', 'assassination']);
 
                 if ($this->game->currentMission) {
                     $this->assertGreaterThanOrEqual(1, $this->game->currentMission->mission_number);

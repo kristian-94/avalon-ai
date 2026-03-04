@@ -176,7 +176,7 @@ class Game extends Model
                 'started_at' => $game->started_at,
             ],
             'messages' => array_values($game->messages
-                ->reject(fn ($message) => $message->message_type !== 'public_chat')
+                ->filter(fn ($message) => $message->message_type === 'public_chat')
                 ->map(function ($message) {
                     return [
                         'id' => $message->id,

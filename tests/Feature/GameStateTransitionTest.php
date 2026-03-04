@@ -65,7 +65,7 @@ class GameStateTransitionTest extends TestCase
         $gameLoop->checkPhaseTransition($game->fresh());
 
         $game->refresh();
-        $this->assertEquals('team_proposal', $game->current_phase);
+        $this->assertEquals('team_discussion', $game->current_phase);
         $this->assertNotNull($game->current_leader_id);
         $this->assertEquals(1, $game->current_mission_id);
     }
@@ -132,7 +132,7 @@ class GameStateTransitionTest extends TestCase
         MissionProposalMember::create(['proposal_id' => $proposal->id, 'player_id' => $players[1]->id]);
         
         $game->update(['current_proposal_id' => $proposal->id]);
-        
+
         $gameLoop->checkPhaseTransition($game->fresh());
 
         $game->refresh();
@@ -280,7 +280,7 @@ class GameStateTransitionTest extends TestCase
         $gameLoop->checkPhaseTransition($game->fresh());
 
         $game->refresh();
-        
+
         $this->assertEquals('team_proposal', $game->current_phase);
         $this->assertNotEquals($players[0]->id, $game->current_leader_id);
         $this->assertEquals('rejected', $proposal->fresh()->status);
@@ -367,8 +367,8 @@ class GameStateTransitionTest extends TestCase
 
         $game->refresh();
         $mission->refresh();
-        
-        $this->assertEquals('team_proposal', $game->current_phase);
+
+        $this->assertEquals('team_discussion', $game->current_phase);
         $this->assertEquals(2, $game->current_mission_id);
         $this->assertEquals('success', $mission->status);
     }

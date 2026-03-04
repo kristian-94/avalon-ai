@@ -82,7 +82,7 @@ export interface Game {
 }
 
 export interface GameState {
-    currentPhase: 'setup' | 'team_proposal' | 'team_voting' | 'mission' | 'assassination' | 'debrief' | 'finished'
+    currentPhase: 'setup' | 'team_proposal' | 'team_discussion' | 'team_voting' | 'mission' | 'assassination' | 'debrief' | 'finished'
     turnCount: number
     currentLeader?: number
     assassination?: Assassination

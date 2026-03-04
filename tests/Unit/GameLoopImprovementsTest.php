@@ -168,9 +168,9 @@ class GameLoopImprovementsTest extends TestCase
         $this->assertStringContainsString('The mission team is executing their mission. Discuss and observe', $summaryObserver);
     }
 
-    public function test_prepare_ai_context_limits_message_history()
+    public function test_prepare_ai_context_includes_full_message_history()
     {
-        // Create 30 messages - mix of types
+        // Create 30 messages
         for ($i = 1; $i <= 30; $i++) {
             Message::create([
                 'game_id' => $this->game->id,
@@ -188,12 +188,14 @@ class GameLoopImprovementsTest extends TestCase
             return str_contains($msg['content'], 'Message');
         });
 
-        // Should only have last 20 messages
-        $this->assertCount(20, $chatMessages);
-        
-        // Verify it's the most recent 20
-        $lastMessage = end($chatMessages);
-        $this->assertStringContainsString('Message 30', $lastMessage['content']);
+        // Should include all 30 messages — full history, no truncation
+        $this->assertCount(30, $chatMessages);
+
+        // Verify ordering: first is Message 1, last is Message 30
+        $first = reset($chatMessages);
+        $last = end($chatMessages);
+        $this->assertStringContainsString('Message 1', $first['content']);
+        $this->assertStringContainsString('Message 30', $last['content']);
     }
 
     public function test_prepare_ai_context_includes_game_state_summary()
@@ -328,7 +330,7 @@ class GameLoopImprovementsTest extends TestCase
 
         // Assertions
         $this->assertStringContainsString('The Assassin is choosing their target. You can try to mislead or stay quiet', $merlinSummary);
-        $this->assertStringContainsString('Choose who you think is Merlin (assassination_target: player_name)', $assassinSummary);
+        $this->assertStringContainsString('You MUST set assassination_target to EXACTLY one of these names', $assassinSummary);
         $this->assertStringContainsString('The Assassin is choosing their target. You can try to mislead or stay quiet', $otherSummary);
     }
 
