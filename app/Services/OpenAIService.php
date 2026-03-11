@@ -15,10 +15,10 @@ class OpenAIService implements AgentService
 
     private string $baseUrl = 'https://api.openai.com/v1/chat/completions';
 
-    public function __construct()
+    public function __construct(?string $model = null)
     {
         $this->apiKey = env('OPEN_AI_API_KEY');
-        $this->model = env('AI_MODEL', 'gpt-4.1-mini');
+        $this->model = $model ?? env('AI_MODEL', 'gpt-4.1-mini');
     }
 
     public function getChatResponse(array $messages): array

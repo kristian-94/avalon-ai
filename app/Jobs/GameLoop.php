@@ -402,7 +402,17 @@ class GameLoop implements ShouldQueue
         $successCount = $game->missions()->where('status', 'success')->count();
         $failCount    = $game->missions()->where('status', 'fail')->count();
         Log::info("AI turn: {$player->name} ({$player->role}) | phase={$game->current_phase} | missions S{$successCount}/F{$failCount}");
-        $response = Agent::getChatResponse($messages);
+
+        $isAssassinationTurn = $game->current_phase === 'assassination' && $player->role === 'assassin';
+        if ($isAssassinationTurn && $assassinationModel = env('ASSASSINATION_MODEL')) {
+            Log::info("Assassination turn: using upgraded model {$assassinationModel}");
+            $agentService = str_starts_with($assassinationModel, 'claude')
+                ? new \App\Services\AnthropicService($assassinationModel)
+                : new \App\Services\OpenAIService($assassinationModel);
+            $response = $agentService->getChatResponse($messages);
+        } else {
+            $response = Agent::getChatResponse($messages);
+        }
 
         // Dump full API context for debugging
         if ($player->role === 'loyal_servant' || ($player->role === 'assassin' && $game->current_phase === 'assassination')) {
@@ -751,7 +761,7 @@ class GameLoop implements ShouldQueue
                 if ($game->current_phase === 'evil_discussion') {
                     $summary .= "Discuss with your evil partner who you think Merlin is. Share your reasoning — the Assassin will make the final call.\n";
                 } else {
-                    // assassination phase — include partner's last discussion message if available
+                    // assassination phase — if evil discussion happened (human was involved), include partner messages
                     $phaseStartEvent = $game->gameEvents()
                         ->where('event_type', 'phase_start')
                         ->where('event_data->phase', 'evil_discussion')
@@ -1407,7 +1417,7 @@ class GameLoop implements ShouldQueue
                 return;
             }
 
-            if ($previousPhase === 'evil_discussion') {
+            if (in_array($previousPhase, ['evil_discussion', 'mission']) && $game->current_phase === 'assassination') {
                 // Hand off to the assassin for the final decision
                 $assassin = $game->players()->where('role', 'assassin')->first();
                 if ($assassin) {
@@ -1455,15 +1465,29 @@ class GameLoop implements ShouldQueue
                     $successfulMissions = $game->missions()->where('status', 'success')->count();
 
                     if ($successfulMissions >= 3) {
-                        $game->current_phase = 'evil_discussion';
+                        $hasHumanEvil = $game->players()
+                            ->whereIn('role', ['assassin', 'minion'])
+                            ->where('is_human', true)
+                            ->exists();
+
+                        $game->current_phase = $hasHumanEvil ? 'evil_discussion' : 'assassination';
+
+                        if (! $hasHumanEvil) {
+                            $assassin = $game->players()->where('role', 'assassin')->first();
+                            if ($assassin) {
+                                $game->current_leader_id = $assassin->id;
+                            }
+                        }
+
                         $game->save();
 
-                        // Log phase_start so we can anchor the discussion window
-                        GameEvent::create([
-                            'game_id' => $game->id,
-                            'event_type' => 'phase_start',
-                            'event_data' => ['phase' => 'evil_discussion'],
-                        ]);
+                        if ($hasHumanEvil) {
+                            GameEvent::create([
+                                'game_id' => $game->id,
+                                'event_type' => 'phase_start',
+                                'event_data' => ['phase' => 'evil_discussion'],
+                            ]);
+                        }
                     }
                 }
 

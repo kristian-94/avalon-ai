@@ -789,12 +789,11 @@ class GameLoopTest extends TestCase
             $teamMember->update(['vote_success' => true]);
         }
 
-        // Process the mission result which should trigger evil_discussion phase
+        // Process the mission result — all players are AI, so skips evil_discussion directly to assassination
         $this->gameLoop->checkPhaseTransition($this->game->fresh());
 
-        // Assertions — should now be in evil_discussion, not assassination directly
         $this->game->refresh();
-        $this->assertEquals('evil_discussion', $this->game->current_phase);
+        $this->assertEquals('assassination', $this->game->current_phase);
         $this->assertNull($this->game->winner);
 
         // Verify mission results
@@ -803,37 +802,6 @@ class GameLoopTest extends TestCase
         $this->assertEquals('success', $mission3->fresh()->status);
         $this->assertEquals('fail', $mission4->fresh()->status);
         $this->assertEquals('success', $mission5->fresh()->status);
-
-        // Verify game messages for each player reflect evil_discussion instructions
-        foreach ($this->players as $player) {
-            $playerMessages = $player->messages()->pluck('content')->toArray();
-            $lastMessage = end($playerMessages);
-
-            if (in_array($player->role, ['assassin', 'minion'])) {
-                $this->assertStringContainsString('Good has won 3 missions', $lastMessage);
-                $this->assertStringContainsString('evil partner', $lastMessage);
-            } elseif ($player->role === 'merlin') {
-                $this->assertStringContainsString('Good has won 3 missions', $lastMessage);
-            } else {
-                $this->assertStringContainsString('Good has won 3 missions', $lastMessage);
-            }
-        }
-
-        // Now simulate evil players speaking to trigger transition to assassination
-        $evilPlayers = $this->game->players()->whereIn('role', ['assassin', 'minion'])->get();
-        foreach ($evilPlayers as $evilPlayer) {
-            \App\Models\Message::create([
-                'game_id' => $this->game->id,
-                'player_id' => $evilPlayer->id,
-                'message_type' => 'public_chat',
-                'content' => 'I think it might be player X.',
-            ]);
-        }
-
-        $this->gameLoop->checkPhaseTransition($this->game->fresh());
-
-        $this->game->refresh();
-        $this->assertEquals('assassination', $this->game->current_phase);
         $assassin = $this->game->players()->where('role', 'assassin')->first();
         $this->assertEquals($assassin->id, $this->game->current_leader_id);
 

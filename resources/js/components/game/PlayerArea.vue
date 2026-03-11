@@ -56,9 +56,30 @@
       <!-- Name -->
       <div class="text-white font-semibold text-sm">{{ player.name }}</div>
 
-      <!-- Vote indicator -->
+      <!-- Vote indicator: live votes during voting phase -->
       <div
-          v-if="latestProposal?.votes && latestProposal.votes[player.player_index] !== undefined"
+          v-if="liveVotes && liveVotes[player.player_index] !== undefined"
+          class="mt-1 vote-indicator vote-enter"
+      >
+        <span class="text-2xl font-black cursor-default drop-shadow-lg" :class="liveVotes[player.player_index] ? 'text-green-400' : 'text-red-400'">
+          {{ liveVotes[player.player_index] ? '✓' : '✗' }}
+        </span>
+      </div>
+
+      <!-- Vote indicator: fading out after phase transition -->
+      <div
+          v-if="fadeVotes && fadeVotes[player.player_index] !== undefined && !(liveVotes && liveVotes[player.player_index] !== undefined)"
+          class="mt-1 vote-indicator transition-all duration-700"
+          :class="showFadeVotes ? 'opacity-100 scale-100' : 'opacity-0 scale-75'"
+      >
+        <span class="text-2xl font-black cursor-default drop-shadow-lg" :class="fadeVotes[player.player_index] ? 'text-green-400' : 'text-red-400'">
+          {{ fadeVotes[player.player_index] ? '✓' : '✗' }}
+        </span>
+      </div>
+
+      <!-- Vote indicator: during mission phase (existing behavior) -->
+      <div
+          v-if="latestProposal?.votes && latestProposal.votes[player.player_index] !== undefined && !fadeVotes"
           class="relative group/tip mt-1"
       >
         <span class="text-sm font-bold cursor-default" :class="latestProposal.votes[player.player_index] ? 'text-green-400' : 'text-red-400'">{{ latestProposal.votes[player.player_index] ? '✓' : '✗' }}</span>
@@ -115,7 +136,7 @@
 
 <script setup lang="ts">
 import type {Player, GameState} from "../../types/game";
-import {computed} from "vue";
+import {computed, ref, watch} from "vue";
 
 const props = defineProps<{
   players: Player[]
@@ -128,11 +149,80 @@ const getAvatarUrl = (name: string) => {
   return aiNames.includes(key) ? `/avatars/${key}.png` : '/avatars/default.png'
 }
 
+// Track vote results that should fade out after phase transition
+const fadeVotes = ref<Record<number, boolean> | null>(null)
+const showFadeVotes = ref(false)
+let fadeTimeout: ReturnType<typeof setTimeout> | null = null
+
 const latestProposal = computed(() => {
   if (!props.gameState.proposals || props.gameState.proposals.length === 0) return null
   if (!props.gameState.currentMission) return null
   if (props.gameState.currentPhase !== 'mission') return null
   return props.gameState.proposals[props.gameState.proposals.length - 1]
+})
+
+// Watch for phase changes — when leaving team_voting, capture the votes and fade them out
+watch(() => props.gameState.currentPhase, (newPhase, oldPhase) => {
+  if (oldPhase === 'team_voting' && newPhase !== 'team_voting') {
+    // Try to get votes from multiple sources
+    let votes: Record<number, boolean> | null = null
+
+    // First try the proposals array
+    const proposals = props.gameState.proposals
+    if (proposals && proposals.length > 0) {
+      const lastProposal = proposals[proposals.length - 1]
+      if (lastProposal?.votes && Object.keys(lastProposal.votes).length > 0) {
+        votes = { ...lastProposal.votes }
+      }
+    }
+
+    // Fallback: use liveVotes snapshot (from currentProposal)
+    if (!votes && liveVotes.value) {
+      votes = { ...liveVotes.value }
+    }
+
+    if (votes && Object.keys(votes).length > 0) {
+      fadeVotes.value = votes
+      showFadeVotes.value = true
+      if (fadeTimeout) clearTimeout(fadeTimeout)
+      fadeTimeout = setTimeout(() => {
+        showFadeVotes.value = false
+        fadeTimeout = setTimeout(() => {
+          fadeVotes.value = null
+        }, 700) // allow CSS transition to complete
+      }, 9000)
+    }
+  }
+})
+
+// Show votes during team_voting as they come in, and briefly after transition
+const liveVotes = computed((): Record<number, boolean> | null => {
+  if (props.gameState.currentPhase !== 'team_voting') return null
+
+  // Check currentProposal (uses player_index keys during voting)
+  const cp = props.gameState.currentProposal
+  if (cp?.votes && Object.keys(cp.votes).length > 0) {
+    // Convert string keys to number keys if needed
+    const votes: Record<number, boolean> = {}
+    for (const [key, val] of Object.entries(cp.votes)) {
+      // Key might be player name or player index
+      const idx = parseInt(key)
+      if (!isNaN(idx)) {
+        votes[idx] = val as boolean
+      } else {
+        // It's a player name, find the index
+        const player = props.players.find(p => p.name === key)
+        if (player) votes[player.player_index] = val as boolean
+      }
+    }
+    if (Object.keys(votes).length > 0) return votes
+  }
+
+  // Fallback to proposals array
+  const proposals = props.gameState.proposals
+  if (!proposals || proposals.length === 0) return null
+  const current = proposals[proposals.length - 1]
+  return current?.votes ?? null
 })
 
 const currentLeader = computed(() => props.gameState.currentLeader ?? null)
@@ -165,3 +255,28 @@ const isAssassin = (player: Player) => {
   return player.role === 'assassin'
 }
 </script>
+
+<style scoped>
+.vote-indicator {
+  display: flex;
+  justify-content: center;
+}
+
+.vote-enter {
+  animation: vote-pop 0.3s ease-out;
+}
+
+@keyframes vote-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  60% {
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+</style>

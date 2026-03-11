@@ -52,6 +52,12 @@ class GroqService implements AgentService
                     'max_tokens' => 500,
                 ]));
 
+            Log::info('Groq request', [
+                'model' => $this->model,
+                'phase' => $currentPhase,
+                'messages' => $messages,
+            ]);
+
             Log::info('Groq raw response', [
                 'status' => $response->status(),
                 'body' => $response->json(),
