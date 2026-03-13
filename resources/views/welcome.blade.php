@@ -7,6 +7,26 @@
     <title>Avalon AI</title>
     <link rel="icon" type="image/png" href="/favicon.png">
 
+    <!-- Preload avatars so they're ready instantly on the setup screen -->
+    <link rel="preload" as="image" href="/avatars/human/barbarian.png">
+    <link rel="preload" as="image" href="/avatars/human/bard.png">
+    <link rel="preload" as="image" href="/avatars/human/druid.png">
+    <link rel="preload" as="image" href="/avatars/human/knight.png">
+    <link rel="preload" as="image" href="/avatars/human/monk.png">
+    <link rel="preload" as="image" href="/avatars/human/paladin.png">
+    <link rel="preload" as="image" href="/avatars/human/ranger.png">
+    <link rel="preload" as="image" href="/avatars/human/rogue.png">
+    <link rel="preload" as="image" href="/avatars/human/warlock.png">
+    <link rel="preload" as="image" href="/avatars/human/wizard.png">
+    <link rel="preload" as="image" href="/avatars/alex.png">
+    <link rel="preload" as="image" href="/avatars/jordan.png">
+    <link rel="preload" as="image" href="/avatars/max.png">
+    <link rel="preload" as="image" href="/avatars/morgan.png">
+    <link rel="preload" as="image" href="/avatars/riley.png">
+    <link rel="preload" as="image" href="/avatars/sam.png">
+    <link rel="preload" as="image" href="/avatars/taylor.png">
+    <link rel="preload" as="image" href="/avatars/jamie.png">
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=figtree:400,600&display=swap" rel="stylesheet"/>
