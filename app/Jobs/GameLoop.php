@@ -1316,10 +1316,9 @@ class GameLoop implements ShouldQueue
     {
         $previousPhase = $game->current_phase;
 
-        // Determine next phase
+        // Determine next phase (mission handled below after outcome is known)
         $game->current_phase = match ($previousPhase) {
             'setup' => 'team_proposal', // Skip discussion on the very first proposal — no game history yet
-            'mission' => 'team_discussion',
             'team_discussion' => 'team_proposal',
             'team_proposal' => 'team_voting',
             'team_voting' => $this->determineNextPhaseAfterVoting($game),
@@ -1460,42 +1459,43 @@ class GameLoop implements ShouldQueue
                             ])->values()->toArray(),
                         ],
                     ]);
-
-                    // Check if game should end
-                    $successfulMissions = $game->missions()->where('status', 'success')->count();
-
-                    if ($successfulMissions >= 3) {
-                        $hasHumanEvil = $game->players()
-                            ->whereIn('role', ['assassin', 'minion'])
-                            ->where('is_human', true)
-                            ->exists();
-
-                        $game->current_phase = $hasHumanEvil ? 'evil_discussion' : 'assassination';
-
-                        if (! $hasHumanEvil) {
-                            $assassin = $game->players()->where('role', 'assassin')->first();
-                            if ($assassin) {
-                                $game->current_leader_id = $assassin->id;
-                            }
-                        }
-
-                        $game->save();
-
-                        if ($hasHumanEvil) {
-                            GameEvent::create([
-                                'game_id' => $game->id,
-                                'event_type' => 'phase_start',
-                                'event_data' => ['phase' => 'evil_discussion'],
-                            ]);
-                        }
-                    }
                 }
 
                 $failedMissions = $game->missions()->where('status', 'fail')->count();
                 $successfulMissions = $game->missions()->where('status', 'success')->count();
 
-                if ($failedMissions < 3 && $successfulMissions < 3) {
-                    // Move to team_discussion before the leader proposes
+                if ($failedMissions >= 3) {
+                    // Evil wins immediately — end game before broadcasting any phase message
+                    $this->endGame($game, 'evil', '3 missions failed');
+
+                    return;
+                } elseif ($successfulMissions >= 3) {
+                    // Good wins — move to assassination phase (or evil_discussion if human evil player)
+                    $hasHumanEvil = $game->players()
+                        ->whereIn('role', ['assassin', 'minion'])
+                        ->where('is_human', true)
+                        ->exists();
+
+                    $game->current_phase = $hasHumanEvil ? 'evil_discussion' : 'assassination';
+
+                    if (! $hasHumanEvil) {
+                        $assassin = $game->players()->where('role', 'assassin')->first();
+                        if ($assassin) {
+                            $game->current_leader_id = $assassin->id;
+                        }
+                    }
+
+                    $game->save();
+
+                    if ($hasHumanEvil) {
+                        GameEvent::create([
+                            'game_id' => $game->id,
+                            'event_type' => 'phase_start',
+                            'event_data' => ['phase' => 'evil_discussion'],
+                        ]);
+                    }
+                } else {
+                    // Game continues — move to team_discussion before the leader proposes
                     $game->current_phase = 'team_discussion';
                     $game->current_leader_id = $this->getNextLeader($game);
                     $game->current_mission_id = $game->missions()
@@ -1517,15 +1517,10 @@ class GameLoop implements ShouldQueue
         }
         $game->save();
 
-        $failedMissions = $game->missions()->where('status', 'fail')->count();
-
         // Add private thoughts for context and instructions
         foreach ($game->players()->where('is_human', false)->get() as $player) {
             $contextMessage = $this->generatePhaseTransitionContext($previousPhase, $game, $player);
-            $instructionsMessage = null; // No instructions for next phase if the game is over.
-            if ($failedMissions < 3) {
-                $instructionsMessage = $this->generateNextPhaseInstructions($game, $player);
-            }
+            $instructionsMessage = $this->generateNextPhaseInstructions($game, $player);
 
             if ($contextMessage) {
                 Message::create([
@@ -1565,12 +1560,6 @@ class GameLoop implements ShouldQueue
         ]);
 
         broadcast(new NewMessage($publicmessage));
-
-        if (isset($failedMissions) && $failedMissions >= 3) {
-            $this->endGame($game, 'evil', '3 missions failed');
-
-            return;
-        }
         broadcast(new GameStateUpdate($game));
     }
 

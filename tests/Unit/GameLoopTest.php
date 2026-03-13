@@ -808,6 +808,145 @@ class GameLoopTest extends TestCase
         Event::assertDispatched(GameStateUpdate::class);
     }
 
+    /**
+     * Regression: when the 3rd mission fails (evil wins), transitionToNextPhase must NOT
+     * broadcast "Team Discussion has begun." or save team_discussion to DB before calling endGame.
+     * Before the fix, the match at the top of transitionToNextPhase always set
+     * current_phase = 'team_discussion' in memory, then saved it at line ~1518 and broadcast
+     * the public message, before the failedMissions >= 3 check called endGame — leaving a brief
+     * window where the DB showed team_discussion and bots could act on that phase.
+     */
+    public function test_no_team_discussion_phase_after_third_mission_failure()
+    {
+        // Mark 2 missions as failures already
+        $mission1 = $this->game->missions()->where('mission_number', 1)->first();
+        $mission2 = $this->game->missions()->where('mission_number', 2)->first();
+        $mission1->update(['status' => 'fail', 'success_votes' => 1, 'fail_votes' => 1]);
+        $mission2->update(['status' => 'fail', 'success_votes' => 2, 'fail_votes' => 1]);
+
+        // Set up mission 3 in progress — evil player sabotages it
+        $mission3 = $this->game->missions()->where('mission_number', 3)->first();
+        $leader = collect($this->players)->first(fn ($p) => $p->role !== 'assassin');
+        $assassin = collect($this->players)->first(fn ($p) => $p->role === 'assassin');
+
+        $proposal = MissionProposal::create([
+            'game_id' => $this->game->id,
+            'mission_id' => $mission3->id,
+            'proposed_by_id' => $leader->id,
+            'proposal_number' => 1,
+            'status' => 'approved',
+        ]);
+
+        // Put a good player and the assassin on the team; assassin votes fail
+        $goodPlayer = collect($this->players)->first(fn ($p) => !in_array($p->role, ['assassin', 'minion']));
+        MissionTeamMember::create(['mission_id' => $mission3->id, 'player_id' => $goodPlayer->id, 'vote_success' => true]);
+        MissionTeamMember::create(['mission_id' => $mission3->id, 'player_id' => $assassin->id, 'vote_success' => false]);
+
+        $this->game->update([
+            'current_phase' => 'mission',
+            'current_leader_id' => $leader->id,
+            'current_mission_id' => $mission3->id,
+            'current_proposal_id' => $proposal->id,
+        ]);
+
+        $this->assertTrue($this->gameLoop->shouldTransitionFromMission($this->game->fresh()));
+
+        $this->gameLoop->checkPhaseTransition($this->game->fresh());
+
+        $this->game->refresh();
+
+        // Game must be in debrief (endGame was called)
+        $this->assertEquals('debrief', $this->game->current_phase,
+            "Expected debrief after 3rd mission failure, got: {$this->game->current_phase}");
+        $this->assertEquals('evil', $this->game->winner);
+
+        // The public "X has begun." message must NOT say "Team Discussion has begun."
+        $wrongPublicMessage = Message::where('game_id', $this->game->id)
+            ->where('message_type', 'public_chat')
+            ->where('content', 'Team Discussion has begun.')
+            ->exists();
+        $this->assertFalse($wrongPublicMessage,
+            '"Team Discussion has begun." must not be broadcast when 3 missions have failed');
+
+        // Must NOT have created a team_discussion phase_start event
+        $this->assertDatabaseMissing('game_events', [
+            'game_id' => $this->game->id,
+            'event_type' => 'phase_start',
+            'event_data' => json_encode(['phase' => 'team_discussion']),
+        ]);
+    }
+
+    /**
+     * Regression: after the 3rd mission succeeds, the game must transition to assassination
+     * (or evil_discussion) — never to team_discussion.
+     */
+    public function test_no_team_discussion_phase_after_third_mission_success()
+    {
+        // Mark missions 1 and 2 as already complete (2 successes before this mission)
+        $mission1 = $this->game->missions()->where('mission_number', 1)->first();
+        $mission2 = $this->game->missions()->where('mission_number', 2)->first();
+        $mission1->update(['status' => 'success', 'success_votes' => 2, 'fail_votes' => 0]);
+        $mission2->update(['status' => 'success', 'success_votes' => 2, 'fail_votes' => 0]);
+
+        // Set up mission 3 in progress with all success votes cast
+        $mission3 = $this->game->missions()->where('mission_number', 3)->first();
+        $leader = collect($this->players)->first(fn ($p) => $p->role !== 'assassin');
+
+        $proposal = MissionProposal::create([
+            'game_id' => $this->game->id,
+            'mission_id' => $mission3->id,
+            'proposed_by_id' => $leader->id,
+            'proposal_number' => 1,
+            'status' => 'approved',
+        ]);
+
+        MissionTeamMember::create(['mission_id' => $mission3->id, 'player_id' => $this->players[0]->id, 'vote_success' => true]);
+        MissionTeamMember::create(['mission_id' => $mission3->id, 'player_id' => $this->players[1]->id, 'vote_success' => true]);
+
+        $this->game->update([
+            'current_phase' => 'mission',
+            'current_leader_id' => $leader->id,
+            'current_mission_id' => $mission3->id,
+            'current_proposal_id' => $proposal->id,
+        ]);
+
+        $this->assertTrue($this->gameLoop->shouldTransitionFromMission($this->game->fresh()));
+
+        $this->gameLoop->checkPhaseTransition($this->game->fresh());
+
+        $this->game->refresh();
+
+        // Phase must be assassination or evil_discussion — never team_discussion
+        $this->assertContains($this->game->current_phase, ['assassination', 'evil_discussion'],
+            "Expected assassination or evil_discussion after 3rd mission success, got: {$this->game->current_phase}");
+
+        // The public "X has begun." message must NOT say "Team Discussion has begun."
+        $wrongPublicMessage = Message::where('game_id', $this->game->id)
+            ->where('message_type', 'public_chat')
+            ->where('content', 'Team Discussion has begun.')
+            ->exists();
+        $this->assertFalse($wrongPublicMessage,
+            '"Team Discussion has begun." must not be broadcast when 3 missions have succeeded');
+
+        // Must NOT have created a team_discussion phase_start event
+        $this->assertDatabaseMissing('game_events', [
+            'game_id' => $this->game->id,
+            'event_type' => 'phase_start',
+            'event_data' => json_encode(['phase' => 'team_discussion']),
+        ]);
+
+        // Bots must not have received team-proposal/discussion instructions
+        $teamDiscussionInstructions = Message::where('game_id', $this->game->id)
+            ->where('message_type', 'game_event')
+            ->where(function ($q) {
+                $q->where('content', 'like', '%Open discussion before%')
+                  ->orWhere('content', 'like', '%propose a team%');
+            })
+            ->exists();
+        $this->assertFalse($teamDiscussionInstructions,
+            'Bots should not receive team_discussion/proposal instructions after assassination phase begins');
+    }
+
     public function test_complete_game_plays_automatically()
     {
         $this->game->refresh();
