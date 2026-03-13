@@ -1,0 +1,76 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        VITE_APP_NAME: ${VITE_APP_NAME:-Avalon}
+        VITE_REVERB_APP_KEY: ${REVERB_APP_KEY}
+        VITE_REVERB_HOST: ${REVERB_HOST}
+        VITE_REVERB_PORT: ${REVERB_PORT:-443}
+        VITE_REVERB_SCHEME: ${REVERB_SCHEME:-https}
+    command: php artisan serve --host=0.0.0.0 --port=8000
+    environment:
+      - PHP_CLI_SERVER_WORKERS=4
+      - REVERB_HOST=reverb
+      - REVERB_PORT=8080
+      - REVERB_SCHEME=http
+    volumes:
+      - ./.env:/app/.env:ro
+      - db-data:/app/database
+      - storage-data:/app/storage
+    depends_on:
+      - reverb
+    restart: unless-stopped
+
+  queue:
+    build:
+      context: .
+      args:
+        VITE_APP_NAME: ${VITE_APP_NAME:-Avalon}
+        VITE_REVERB_APP_KEY: ${REVERB_APP_KEY}
+        VITE_REVERB_HOST: ${REVERB_HOST}
+        VITE_REVERB_PORT: ${REVERB_PORT:-443}
+        VITE_REVERB_SCHEME: ${REVERB_SCHEME:-https}
+    command: php artisan queue:listen --tries=1 --sleep=0
+    environment:
+      - REVERB_HOST=reverb
+      - REVERB_PORT=8080
+      - REVERB_SCHEME=http
+    volumes:
+      - ./.env:/app/.env:ro
+      - db-data:/app/database
+      - storage-data:/app/storage
+    depends_on:
+      - reverb
+    restart: unless-stopped
+
+  reverb:
+    build:
+      context: .
+      args:
+        VITE_APP_NAME: ${VITE_APP_NAME:-Avalon}
+        VITE_REVERB_APP_KEY: ${REVERB_APP_KEY}
+        VITE_REVERB_HOST: ${REVERB_HOST}
+        VITE_REVERB_PORT: ${REVERB_PORT:-443}
+        VITE_REVERB_SCHEME: ${REVERB_SCHEME:-https}
+    command: php artisan reverb:start --host=0.0.0.0 --port=8080
+    volumes:
+      - ./.env:/app/.env:ro
+      - db-data:/app/database
+      - storage-data:/app/storage
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - app
+      - reverb
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  storage-data:

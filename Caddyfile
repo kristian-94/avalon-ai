@@ -1,0 +1,7 @@
+:8100 {
+	@websocket {
+		path /app/*
+	}
+	reverse_proxy @websocket reverb:8080
+	reverse_proxy app:8000
+}

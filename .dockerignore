@@ -1,0 +1,17 @@
+node_modules
+vendor
+public/build
+public/hot
+.git
+database/*.sqlite
+database/*.sqlite-journal
+storage/logs/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/framework/cache/*
+.env
+.env.backup
+.env.production
+test-results
+.phpunit.cache
+.phpunit.result.cache
