@@ -20,6 +20,7 @@ class Player extends Model
         'game_id',
         'player_index',
         'name',
+        'avatar',
         'role',
         'is_human',
         'role_knowledge',

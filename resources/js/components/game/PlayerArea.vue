@@ -20,7 +20,7 @@
       <!-- Avatar -->
       <div class="relative mb-3">
         <img
-          :src="getAvatarUrl(player.name)"
+          :src="getAvatarUrl(player)"
           :alt="player.name"
           class="w-28 h-28 rounded-full ring-2 ring-white/20 object-cover"
         />
@@ -144,8 +144,10 @@ const props = defineProps<{
 }>()
 
 const aiNames = ['max', 'alex', 'sam', 'jordan', 'riley', 'taylor', 'morgan', 'jamie']
-const getAvatarUrl = (name: string) => {
-  const key = name.toLowerCase()
+
+const getAvatarUrl = (player: Player) => {
+  if (player.avatar) return `/avatars/human/${player.avatar}.png`
+  const key = player.name.toLowerCase()
   return aiNames.includes(key) ? `/avatars/${key}.png` : '/avatars/default.png'
 }
 

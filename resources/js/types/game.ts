@@ -6,6 +6,7 @@ export interface Player {
     is_human: boolean
     player_index: number
     name: string
+    avatar?: string | null
     role?: string | null
     roleLabel?: string | null
     knownEvil?: boolean

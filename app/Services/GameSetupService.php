@@ -89,10 +89,10 @@ CORE STRATEGY:
 - Protecting Merlin: Merlin is on your team and knows who is evil, but must hide it. Watch for players who make subtle, accurate reads — they might be Merlin. If you think you have identified Merlin, support their accusations and echo their suspicions so the Assassin cannot tell who the real source is. Make your own bold accusations too — if you look like you might be Merlin, the Assassin may target you instead, which protects the real Merlin and wins the game for good.',
     ];
 
-    public static function initializeGame($humanPlayers = 0, ?string $preferredRole = null): Game
+    public static function initializeGame($humanPlayers = 0, ?string $preferredRole = null, ?string $humanName = null, ?string $humanAvatar = null): Game
     {
         $mode = $humanPlayers > 0 ? 'play' : 'watch';
-        DB::transaction(static function () use ($mode, $preferredRole, &$game) {
+        DB::transaction(static function () use ($mode, $preferredRole, $humanName, $humanAvatar, &$game) {
             $roles = ['merlin', 'assassin', 'loyal_servant', 'loyal_servant', 'minion'];
             shuffle($roles);
 
@@ -139,12 +139,13 @@ CORE STRATEGY:
 
             foreach ($roles as $index => $role) {
                 $isHuman = $hasHumanPlayer && $index === $humanRoleIndex;
-                $playerName = $isHuman ? 'Kristian' : $aiNames[$index];
+                $playerName = $isHuman ? ($humanName ?? 'Player') : $aiNames[$index];
 
                 $player = Player::create([
                     'game_id' => $game->id,
                     'player_index' => $index,
                     'name' => $playerName,
+                    'avatar' => $isHuman ? $humanAvatar : null,
                     'role' => $role,
                     'is_human' => $isHuman,
                     'role_knowledge' => [], // Will update after all players are created
